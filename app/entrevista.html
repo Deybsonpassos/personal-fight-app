@@ -32,7 +32,7 @@
 <script src="config.js"></script>
 <script>
 const sb = supabase.createClient(PF_CONFIG.SUPABASE_URL, PF_CONFIG.SUPABASE_ANON_KEY);
-const token = new URLSearchParams(location.search).get("t") || "";
+const token = new URLSearchParams(location.search).get("t") || (PF_CONFIG.DEMO ? "DEMO" : "");
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const KEY = "pf_entrevista_" + token;
@@ -113,10 +113,42 @@ async function enviar() {
   const { data, error } = await sb.rpc("entrevista_enviar", { p_token: token, d: r });
   if (error) { b.disabled = false; b.textContent = "Enviar"; toast("Não foi possível enviar: " + error.message); return; }
   try { sessionStorage.removeItem(KEY); } catch {}
-  const nome = r.apelido || r.nome.split(" ")[0];
-  $("#prog").innerHTML = ""; $("#sub").textContent = "Entrevista enviada"; $("#titulo").textContent = `Obrigado, ${nome}`;
-  $("#tela").innerHTML = `<p style="font-size:17px;line-height:1.5">Suas respostas chegaram ao professor. Ele monta seu ponto de partida e entra em contato pelo WhatsApp para combinar a primeira sessão.</p>
-    <dl><dt>Treina</dt><dd>${esc((r.modalidades || []).map((m) => ({ muay_thai: "Muay Thai", kickboxing: "Kickboxing" })[m]).join(" e "))}</dd><dt>Objetivo</dt><dd>${esc(r.objetivo_frase || "")}</dd><dt>Frequência</dt><dd>${esc(r.frequencia)}x por semana · ${esc(r.horarios)}</dd></dl>
+  $("#prog").innerHTML = ""; window.scrollTo(0, 0);
+  escolherHorarios();
+}
+const DIAS_L = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+const nome = () => r.apelido || (r.nome || "").split(" ")[0];
+async function escolherHorarios() {
+  const { data: liv } = await sb.rpc("horarios_livres", { p_token: token });
+  const slots = (liv && liv.slots) || [];
+  if (!slots.length) return concluir(null);
+  const freq = Math.max(1, Math.min(Number(liv.frequencia) || 1, 4));
+  $("#sub").textContent = "Última etapa"; $("#titulo").textContent = "Seus horários";
+  const porDia = {}; slots.forEach((x) => (porDia[x.dia_semana] = porDia[x.dia_semana] || []).push(x.hora));
+  $("#tela").innerHTML = `<p style="font-size:16px;line-height:1.5">Entrevista enviada, ${esc(nome())}. Agora escolha <b>${freq === 1 ? "1 horário" : "até " + freq + " horários"}</b> por semana entre os que o professor tem livres. Cada sessão dura 1 hora; o horário se repete toda semana.</p>
+    <form id="fh">${Object.keys(porDia).sort().map((d) => `<label class="q">${DIAS_L[d]}</label><div class="opts grid">${porDia[d].map((h) => `<label class="opt"><input type="checkbox" name="slot" value="${d}|${h}"><span>${h}</span></label>`).join("")}</div>`).join("")}
+    <div class="btns"><button type="submit" class="btn primario">Confirmar horários</button></div>
+    <div class="btns"><button type="button" class="btn link" id="depois">Prefiro combinar depois pelo WhatsApp</button></div>
+    <div class="erro" id="erro-h"></div></form>`;
+  $("#depois").onclick = () => concluir([]);
+  $("#fh").onsubmit = async (e) => {
+    e.preventDefault();
+    const esc_ = [...document.querySelectorAll('input[name=slot]:checked')].map((i) => { const [d, h] = i.value.split("|"); return { dia_semana: Number(d), hora: h }; });
+    const err = $("#erro-h");
+    if (!esc_.length) { err.textContent = "Escolha pelo menos um horário."; err.style.display = "block"; return; }
+    if (esc_.length > freq) { err.textContent = `Você combinou ${freq}x por semana: escolha no máximo ${freq}.`; err.style.display = "block"; return; }
+    const bt = e.target.querySelector('button[type=submit]'); bt.disabled = true; bt.textContent = "Agendando…";
+    const { data, error } = await sb.rpc("agendar_por_convite", { p_token: token, p_slots: esc_ });
+    if (error) { bt.disabled = false; bt.textContent = "Confirmar horários"; err.textContent = "Não deu: " + error.message; err.style.display = "block"; return; }
+    concluir(esc_);
+  };
+  window.scrollTo(0, 0);
+}
+function concluir(escolhidos) {
+  $("#sub").textContent = "Tudo certo"; $("#titulo").textContent = `Obrigado, ${nome()}`;
+  const hor = escolhidos && escolhidos.length ? `<dt>Seus horários</dt><dd>${escolhidos.map((x) => `${DIAS_L[x.dia_semana]} às ${x.hora}`).join("<br>")}<br><span class="muted small">já marcados para as próximas 4 semanas; o professor confirma com você.</span></dd>` : `<dt>Horários</dt><dd>${escolhidos ? "Você preferiu combinar depois." : "O professor ainda não liberou a agenda online."} Ele entra em contato pelo WhatsApp para marcar.</dd>`;
+  $("#tela").innerHTML = `<p style="font-size:17px;line-height:1.5">Suas respostas chegaram ao professor.</p>
+    <dl><dt>Treina</dt><dd>${esc((r.modalidades || []).map((m) => ({ muay_thai: "Muay Thai", kickboxing: "Kickboxing" })[m]).join(" e "))}</dd><dt>Objetivo</dt><dd>${esc(r.objetivo_frase || "")}</dd><dt>Frequência</dt><dd>${esc(r.frequencia)}x por semana</dd>${hor}</dl>
     <p class="muted small" style="margin-top:20px">Você pode fechar esta página. Este link não funciona mais depois de enviado.</p>`;
   window.scrollTo(0, 0);
 }

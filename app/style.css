@@ -145,6 +145,17 @@ main { padding: 4px 16px 100px; max-width: 720px; width: 100%; margin: 0 auto; }
 .dia .s { background: var(--card2); padding: 3px 2px; margin-bottom: 2px; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: center; font-family: var(--mono); }
 .dia .s.realizada { background: var(--accent); color: var(--accent-ink); } .dia .s.falta_sem_aviso { background: var(--red); color: #fff; } .dia .s.cancelada_aluno, .dia .s.cancelada_professor, .dia .s.remarcada { opacity: .5; }
 
+/* calendário mensal */
+.mcab { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; font-family: var(--mono); font-size: 10px; color: var(--muted); text-align: center; margin-bottom: 2px; }
+.mes { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.mdia { border: 1px solid var(--line); min-height: 64px; padding: 3px 2px; font-size: 9px; cursor: pointer; overflow: hidden; }
+.mdia.vazio { border-color: transparent; cursor: default; }
+.mdia .n { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: right; padding-right: 2px; }
+.mdia.hoje { border-color: var(--accent); } .mdia.hoje .n { color: var(--accent); font-weight: 700; }
+.mdia.tem .n { color: var(--ink); }
+.mdia .p { background: var(--card2); padding: 1px 2px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
+.mdia .p.realizada { background: var(--accent); color: var(--accent-ink); } .mdia .p.falta_sem_aviso { background: var(--red); color: #fff; } .mdia .p.cancelada_aluno, .mdia .p.cancelada_professor, .mdia .p.remarcada { opacity: .45; } .mdia .p.mais { background: none; color: var(--muted); }
+
 /* modal (folha inferior) */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: end center; z-index: 20; }
 .modal-caixa { background: var(--bg); border-top: 1px solid var(--line2); width: 100%; max-width: 720px; max-height: 94dvh; overflow: auto; padding: 16px 16px max(16px, env(safe-area-inset-bottom)); }

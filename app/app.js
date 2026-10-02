@@ -34,6 +34,9 @@ const isoLocal = (d) => { const p = (n) => String(n).padStart(2, "0"); return `$
 const inicioDia = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 const addDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const inicioSemana = (d) => { const x = inicioDia(d); x.setDate(x.getDate() - x.getDay()); return x; };
+const inicioMes = (d) => { const x = inicioDia(d); x.setDate(1); return x; };
+const addMeses = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; };
+const MESES_LONGO = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const primeiroNome = (n) => (n || "").split(" ")[0];
 const up = (s) => String(s || "").toUpperCase();
 
@@ -79,7 +82,7 @@ async function ok(promise, msgErro = "Erro ao salvar") { const { data, error } =
 
 // ---------------------------------------------------------------- 3. HOJE
 const telas = {};
-let telaAtual = "hoje", subHoje = "hoje", semanaBase = inicioSemana(new Date());
+let telaAtual = "hoje", subHoje = "hoje", semanaBase = inicioSemana(new Date()), mesBase = inicioMes(new Date());
 const TITULOS = { hoje: "Hoje", alunos: "Alunos", diarios: "Diários", acervo: "Acervo" };
 
 async function render(nome = telaAtual) {
@@ -102,9 +105,10 @@ telas.hoje = async (root) => {
   topo(`${fmtCurta(hoje)} · ${sessoes.length} ${sessoes.length === 1 ? "sessão" : "sessões"}`, "Hoje", pendentes.length ? `<button class="badge" id="ir-pend">${pendentes.length} pendente${pendentes.length > 1 ? "s" : ""}</button>` : `<span class="badge cinza">em dia</span>`);
   $("#ir-pend") && ($("#ir-pend").onclick = () => render("diarios"));
 
-  root.innerHTML = `<div class="seg"><button data-s="hoje" class="${subHoje === "hoje" ? "on" : ""}">Hoje</button><button data-s="semana" class="${subHoje === "semana" ? "on" : ""}">Semana</button></div><div id="hoje-corpo"></div>`;
+  root.innerHTML = `<div class="seg"><button data-s="hoje" class="${subHoje === "hoje" ? "on" : ""}">Hoje</button><button data-s="semana" class="${subHoje === "semana" ? "on" : ""}">Semana</button><button data-s="mes" class="${subHoje === "mes" ? "on" : ""}">Mês</button></div><div id="hoje-corpo"></div>`;
   $$(".seg button", root).forEach((b) => (b.onclick = () => { subHoje = b.dataset.s; render("hoje"); }));
   if (subHoje === "semana") return renderSemana($("#hoje-corpo", root));
+  if (subHoje === "mes") return renderMes($("#hoje-corpo", root));
 
   const corpo = $("#hoje-corpo", root);
   const prox = sessoes.find((s) => s.status === "agendada") || sessoes[0];
@@ -160,6 +164,38 @@ async function renderSemana(root) {
   $("#avulsa", root).onclick = () => formSessao();
 }
 
+// calendário mensal: visão geral; toque no dia abre as sessões daquele dia
+async function renderMes(root) {
+  const fim = addMeses(mesBase, 1);
+  const { data: ss } = await db.sessoes(mesBase, fim);
+  const sessoes = ss || [], hoje = inicioDia(new Date()).getTime();
+  const porDia = {}; sessoes.forEach((s) => { const k = inicioDia(new Date(s.inicio)).getTime(); (porDia[k] = porDia[k] || []).push(s); });
+  const primeiroDow = mesBase.getDay(), dias = fim.getDate() === 1 ? Math.round((fim - mesBase) / 864e5) : 30;
+  const feitas = sessoes.filter((s) => s.status === "realizada").length, faltas = sessoes.filter((s) => s.status === "falta_sem_aviso").length, agendadas = sessoes.filter((s) => s.status === "agendada").length;
+  const celulas = [];
+  for (let i = 0; i < primeiroDow; i++) celulas.push(`<div class="mdia vazio"></div>`);
+  for (let d = 1; d <= dias; d++) {
+    const data = new Date(mesBase.getFullYear(), mesBase.getMonth(), d), k = data.getTime(), lst = porDia[k] || [];
+    celulas.push(`<div class="mdia ${k === hoje ? "hoje" : ""} ${lst.length ? "tem" : ""}" data-k="${k}"><div class="n">${d}</div>${lst.slice(0, 3).map((s) => `<div class="p ${s.status}">${fmtHora(s.inicio)} ${esc(primeiroNome(s.alunos?.nome).slice(0, 4))}</div>`).join("")}${lst.length > 3 ? `<div class="p mais">+${lst.length - 3}</div>` : ""}</div>`);
+  }
+  root.innerHTML = `<div class="linha-entre" style="margin-top:12px"><button class="link nav-mes" data-d="-1">‹</button><strong class="mono small" style="text-transform:uppercase">${MESES_LONGO[mesBase.getMonth()]} ${mesBase.getFullYear()}</strong><button class="link nav-mes" data-d="1">›</button></div>
+    <div class="mono small muted" style="margin:4px 0 6px">${sessoes.length} sessões · ${feitas} realizadas · ${faltas} faltas · ${agendadas} agendadas</div>
+    <div class="mcab">${DIAS.map((d) => `<div>${d[0]}</div>`).join("")}</div>
+    <div class="mes">${celulas.join("")}</div>
+    <div class="acoes"><button class="btn" id="hoje-mes">Mês atual</button><button class="btn primario" id="avulsa">+ Avulsa</button></div>`;
+  $$(".nav-mes", root).forEach((b) => (b.onclick = () => { mesBase = addMeses(mesBase, Number(b.dataset.d)); render("hoje"); }));
+  $("#hoje-mes", root).onclick = () => { mesBase = inicioMes(new Date()); render("hoje"); };
+  $("#avulsa", root).onclick = () => formSessao();
+  $$(".mdia[data-k]", root).forEach((el) => (el.onclick = () => abrirDia(new Date(Number(el.dataset.k)), porDia[el.dataset.k] || [])));
+}
+
+function abrirDia(data, lst) {
+  const corpo = abrirModal(fmtCurta(data), `<div class="lista">${lst.length ? lst.map(itemSessaoDia).join("") : '<div class="vazio">Nenhuma sessão neste dia.</div>'}</div><button class="btn primario" id="nova-dia">+ Sessão neste dia</button>`, `${lst.length} ${lst.length === 1 ? "sessão" : "sessões"}`);
+  $$(".item", corpo).forEach((el) => (el.onclick = () => abrirDiario(el.dataset.id)));
+  $("#nova-dia", corpo).onclick = () => { const d = new Date(data); d.setHours(8, 0, 0, 0); formSessao({ inicio: d }); };
+}
+const itemSessaoDia = (s) => `<div class="item" data-id="${s.id}"><div class="hora">${fmtHora(s.inicio)}</div><div class="t"><b>${esc(s.alunos?.nome)}</b><span>${esc(up(s.modalidades?.nome || ""))}${s.locais?.apelido ? " · " + esc(up(s.locais.apelido)) : ""}</span></div><span class="chip ${s.status}">${STATUS_LABEL[s.status]}</span></div>`;
+
 async function gerarSemana(base, existentes) {
   const { data: hs } = await db.horariosTodos();
   if (!hs?.length) return toast("Nenhum horário fixo cadastrado. Cadastre na ficha do aluno.");
@@ -194,15 +230,25 @@ telas.alunos = async (root) => {
   await carregar();
 };
 
-function linkEntrevista(token) { return new URL(`entrevista.html?t=${token}`, location.href).href; }
+function linkEntrevista(token) { return PF_CONFIG.DEMO ? `(demo) abra a aba ENTREVISTA · código ${token}` : new URL(`entrevista.html?t=${token}`, document.baseURI).href; }
 async function criarConvite() {
-  const rotulo = prompt("Para quem é o convite? (ex.: Gisele, indicação do João)"); if (rotulo === null) return;
-  const perfil = await db.perfil();
-  const c = await ok(sb.from("convites").insert({ rotulo: rotulo || null, criado_por: perfil?.id }).select("token").single(), "Erro ao criar convite");
-  const link = linkEntrevista(c.token);
-  abrirModal("Convite criado", `<p class="small">Mande este link para ${esc(rotulo || "a pessoa")}. Vale por 14 dias e só pode ser usado uma vez.</p><p class="mono small" style="word-break:break-all;border:1px solid var(--line);padding:10px">${esc(link)}</p>
-    <div class="acoes"><button class="btn primario" id="cp">Copiar link</button><a class="btn" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`Olá! Antes da nossa primeira aula, responda esta entrevista rápida (uns 5 min): ${link}`)}">WhatsApp</a></div>`, "Entrevista inicial · adulto");
-  $("#cp").onclick = () => copiar(link, "Link copiado.");
+  const corpo = abrirModal("Convite para a entrevista", `<form class="form" id="fc">
+      <label>Nome da pessoa<input name="rotulo" required placeholder="ex.: Gisele (indicação do João)"></label>
+      <label>WhatsApp<input name="telefone" inputmode="tel" placeholder="91 9xxxx-xxxx"></label>
+      <p class="small muted">A pessoa recebe um link, responde 6 etapas (uns 5 min) e, no final, já escolhe os horários entre os que você liberou em Acervo → Atendimento. A ficha aparece pronta em Alunos.</p>
+      <button class="btn primario" type="submit">Gerar link</button></form>`, "Entrevista inicial · adulto");
+  $("#fc", corpo).onsubmit = async (e) => {
+    e.preventDefault(); const d = formDados(e.target);
+    const perfil = await db.perfil();
+    const c = await ok(sb.from("convites").insert({ rotulo: d.rotulo || null, telefone: d.telefone || null, criado_por: perfil?.id }).select("token").single(), "Erro ao criar convite");
+    const link = linkEntrevista(c.token);
+    const tel = (d.telefone || "").replace(/\D/g, "");
+    const msg = `Olá, ${primeiroNome(d.rotulo)}! Antes da nossa primeira aula, responda esta entrevista rápida (uns 5 min). No final você já escolhe seus horários: ${link}`;
+    abrirModal("Convite pronto", `<p class="small">${PF_CONFIG.DEMO ? "<b>Modo demonstração:</b> toque em ENTREVISTA no topo da página. " : ""}Link de uso único, válido por 14 dias.</p><p class="mono small" style="word-break:break-all;border:1px solid var(--line);padding:10px">${esc(link)}</p>
+      <a class="btn primario" target="_blank" rel="noopener" href="https://wa.me/${tel ? "55" + tel : ""}?text=${encodeURIComponent(msg)}">Enviar pelo WhatsApp${tel ? "" : " (escolher contato)"}</a>
+      <button class="btn" id="cp">Copiar link</button>`, esc(d.rotulo));
+    $("#cp").onclick = () => copiar(link, "Link copiado.");
+  };
 }
 
 // código de acesso ao app do aluno (adulto → a própria conta; menor → conta do responsável)
@@ -211,7 +257,7 @@ async function gerarAcesso(a) {
   const parentesco = responsavel ? prompt("Parentesco do responsável (mãe, pai, avó...):") : null; if (responsavel && parentesco === null) return;
   const perfil = await db.perfil();
   const c = await ok(sb.from("convites").insert({ tipo: "acesso", aluno_id: a.id, papel_alvo: responsavel ? "responsavel" : "aluno", parentesco: parentesco || null, rotulo: a.nome, criado_por: perfil?.id }).select("token").single(), "Erro ao criar código");
-  const link = new URL(`aluno.html?c=${c.token}`, location.href).href;
+  const link = PF_CONFIG.DEMO ? `(demo) abra a aba ALUNO · código ${c.token}` : new URL(`aluno.html?c=${c.token}`, document.baseURI).href;
   const msg = `Olá! Seu acesso ao app de treino${responsavel ? ` de ${primeiroNome(a.nome)}` : ""}: ${link}\nAbra no celular, crie sua senha e adicione à tela de início.`;
   abrirModal("Código de acesso", `<p class="small">${responsavel ? `Para o responsável (${esc(parentesco || "")}) de <b>${esc(a.nome)}</b>.` : `Para <b>${esc(a.nome)}</b> entrar no app do aluno.`} Uso único, 14 dias. A pessoa cria e-mail e senha na primeira vez.</p><p class="mono small" style="word-break:break-all;border:1px solid var(--line);padding:10px">${esc(link)}</p>
     <div class="acoes"><button class="btn primario" id="cp">Copiar</button><a class="btn" target="_blank" rel="noopener" href="https://wa.me/${a.telefone ? "55" + a.telefone.replace(/\D/g, "") : ""}?text=${encodeURIComponent(msg)}">WhatsApp</a></div>`, "App do aluno");
@@ -281,7 +327,7 @@ function abaSessoes({ a, ss }, root) {
 
 function abaHorarios({ a, hs, locais, pcs }, root) {
   root.innerHTML = `
-    <div class="secao"><div class="eyebrow">Horários fixos</div><div class="lista">${hs.map((h) => `<div class="item" data-h="${h.id}"><div class="hora">${h.hora_inicio.slice(0, 5)}</div><div class="t"><b>${DIAS_LONGO[h.dia_semana]}</b><span>${h.duracao_min} min · ${esc(h.locais?.apelido || "local")}${h.locais?.bairro ? " · " + esc(h.locais.bairro) : ""}</span></div><button class="link rm-h">remover</button></div>`).join("") || '<div class="vazio">Nenhum horário fixo.</div>'}</div><button class="btn" id="f-horario">+ Horário fixo</button></div>
+    <div class="secao"><div class="eyebrow">Horários fixos</div><div class="lista">${hs.map((h) => `<div class="item" data-h="${h.id}"><div class="hora">${h.hora_inicio.slice(0, 5)}</div><div class="t"><b>${DIAS_LONGO[h.dia_semana]}</b><span>${h.duracao_min} min · ${esc(h.locais?.apelido || "local")}${h.locais?.bairro ? " · " + esc(h.locais.bairro) : ""}${h.origem === "aluno" ? " · escolhido pelo aluno" : ""}</span></div><button class="link rm-h">remover</button></div>`).join("") || '<div class="vazio">Nenhum horário fixo.</div>'}</div><button class="btn" id="f-horario">+ Horário fixo</button></div>
     <div class="secao"><div class="eyebrow">Locais</div><div class="lista">${locais.map((l) => `<div class="item"><div class="t"><b>${esc(l.apelido || LOCAL_LABEL[l.tipo])}${l.padrao ? " (padrão)" : ""}</b><span>${esc(l.endereco)}${l.bairro ? " · " + esc(l.bairro) : ""}</span></div></div>`).join("") || '<div class="vazio">Nenhum local.</div>'}</div><button class="btn" id="f-local">+ Local</button></div>
     <div class="secao"><div class="eyebrow">Pacotes</div><div class="lista">${pcs.map((p) => `<div class="item"><div class="t"><b>${esc(p.nome)} — ${p.sessoes_restantes}/${p.sessoes_total}</b><span>${fmtReais(p.preco_centavos)} · ${p.pago ? "pago" : "<span class='vermelho'>NÃO PAGO</span>"}${p.vence_em ? " · vence " + fmtData(p.vence_em) : ""}${p.vencido ? " · VENCIDO" : ""}</span></div>${!p.pago ? `<button class="btn mini pg" data-p="${p.id}">pago</button>` : ""}</div>`).join("") || '<div class="vazio">Nenhum pacote.</div>'}</div><button class="btn" id="f-pacote">+ Pacote</button></div>`;
   $("#f-horario", root).onclick = () => formHorario(a, locais);
@@ -415,7 +461,7 @@ async function abrirDiario(id) {
 let subAcervo = "tecnicas";
 telas.acervo = async (root) => {
   topo("Currículo · catálogos · ajustes", "Acervo");
-  root.innerHTML = `<div class="seg">${["tecnicas", "correcoes", "planos", "ajustes"].map((k) => `<button data-s="${k}" class="${subAcervo === k ? "on" : ""}">${{ tecnicas: "Técnicas", correcoes: "Correções", planos: "Planos", ajustes: "Ajustes" }[k]}</button>`).join("")}</div><div id="ac"></div>`;
+  root.innerHTML = `<div class="seg" style="flex-wrap:wrap">${["tecnicas", "correcoes", "atendimento", "planos", "ajustes"].map((k) => `<button data-s="${k}" class="${subAcervo === k ? "on" : ""}">${{ tecnicas: "Técnicas", correcoes: "Correções", atendimento: "Atendimento", planos: "Planos", ajustes: "Ajustes" }[k]}</button>`).join("")}</div><div id="ac"></div>`;
   $$(".seg button", root).forEach((b) => (b.onclick = () => { subAcervo = b.dataset.s; render("acervo"); }));
   const ac = $("#ac", root);
   if (subAcervo === "tecnicas") {
@@ -430,6 +476,16 @@ telas.acervo = async (root) => {
     $$("[contenteditable]", ac).forEach((el) => (el.onblur = async () => { const nome = el.textContent.trim(); if (!nome) return; await ok(sb.from("correcoes").update({ nome }).eq("id", el.dataset.c)); toast("Renomeada."); }));
     $$(".rm", ac).forEach((b) => (b.onclick = async () => { await ok(sb.from("correcoes").update({ ativa: false }).eq("id", b.dataset.c)); render("acervo"); }));
     $("#add", ac).onclick = async () => { const nome = prompt("Nova correção:"); if (!nome) return; await ok(sb.from("correcoes").insert({ nome: nome.trim(), ordem: 50 })); render("acervo"); };
+  } else if (subAcervo === "atendimento") {
+    const { data: disp } = await sb.from("disponibilidade").select("*").eq("ativo", true).order("dia_semana").order("hora_inicio");
+    const { data: hs } = await db.horariosTodos();
+    const ocupados = (hs || []).map((h) => `${DIAS[h.dia_semana]} ${h.hora_inicio.slice(0, 5)} ${primeiroNome(h.alunos?.nome)}`);
+    ac.innerHTML = `<p class="muted small" style="margin:10px 0 0">Janelas em que você atende. O aluno novo escolhe horários de 1 h dentro delas, logo depois da entrevista, só os que ainda não têm outro aluno. Os horários fixos já ocupados aparecem abaixo.</p>
+      <div class="secao"><div class="eyebrow">Janelas semanais</div><div class="lista">${(disp || []).length ? disp.map((d) => `<div class="item"><div class="hora">${d.hora_inicio.slice(0, 5)}</div><div class="t"><b>${DIAS_LONGO[d.dia_semana]}</b><span>até ${d.hora_fim.slice(0, 5)}</span></div><button class="link rm-d" data-d="${d.id}">remover</button></div>`).join("") : '<div class="vazio">Nenhuma janela. Sem isso, o aluno não consegue escolher horário na entrevista (vai combinar pelo WhatsApp).</div>'}</div>
+      <form class="form" id="fdisp"><div class="duas"><label>Dia<select name="dia_semana">${DIAS_LONGO.map((d, i) => `<option value="${i}" ${i === 1 ? "selected" : ""}>${d}</option>`).join("")}</select></label><label>Repetir para<select name="ate"><option value="">só este dia</option><option value="1-5">segunda a sexta</option><option value="1-6">segunda a sábado</option></select></label></div><div class="duas"><label>Das<input type="time" name="hora_inicio" value="07:00" required></label><label>Até<input type="time" name="hora_fim" value="10:00" required></label></div><button class="btn primario" type="submit">+ Janela</button></form></div>
+      <div class="secao"><div class="eyebrow">Horários fixos já ocupados</div><div class="small muted">${ocupados.length ? ocupados.join(" · ") : "nenhum"}</div></div>`;
+    $$(".rm-d", ac).forEach((b) => (b.onclick = async () => { await ok(sb.from("disponibilidade").update({ ativo: false }).eq("id", b.dataset.d)); render("acervo"); }));
+    $("#fdisp", ac).onsubmit = async (e) => { e.preventDefault(); const d = formDados(e.target); if (d.hora_fim <= d.hora_inicio) return toast("Hora final precisa ser depois da inicial."); const dias = d.ate === "1-5" ? [1, 2, 3, 4, 5] : d.ate === "1-6" ? [1, 2, 3, 4, 5, 6] : [Number(d.dia_semana)]; await ok(sb.from("disponibilidade").insert(dias.map((dia) => ({ dia_semana: dia, hora_inicio: d.hora_inicio, hora_fim: d.hora_fim })))); toast("Janela salva."); render("acervo"); };
   } else if (subAcervo === "planos") {
     const { data: pl } = await db.planos();
     ac.innerHTML = `<div class="secao"><div class="eyebrow">Planos e preços</div><div class="lista">${pl?.length ? pl.map((p) => `<div class="item"><div class="t"><b>${esc(p.nome)}</b><span>${p.sessoes} sessão(ões) · ${fmtReais(p.preco_centavos)}${p.validade_dias ? " · " + p.validade_dias + " dias" : ""}${p.inclui_deslocamento ? "" : " · deslocamento à parte"}</span></div></div>`).join("") : '<div class="vazio">Nenhum plano. Ex.: "Avulsa 1h", "Pacote 8", "Mensal 2x/semana".</div>'}</div><button class="btn" id="novo-plano">+ Plano</button></div>`;
@@ -439,12 +495,18 @@ telas.acervo = async (root) => {
     ac.innerHTML = `
       <div class="secao"><div class="eyebrow">Política de cancelamento</div><div class="form"><label>Antecedência mínima (horas) para cancelar sem perder a sessão</label><div class="duas"><input type="number" id="cfg-ant" min="0" max="72" value="${cfg.antecedencia}"><button class="btn" id="salvar-cfg" style="margin:0">Salvar</button></div></div></div>
       <div class="secao"><div class="eyebrow">Convites de entrevista em aberto</div><div class="lista">${cv?.length ? cv.map((c) => `<div class="item" data-tk="${c.token}"><div class="t"><b>${esc(c.rotulo || "sem nome")}</b><span>criado ${fmtData(c.criado_em)} · expira ${fmtData(c.expira_em)}</span></div><button class="btn mini cp" data-tk="${c.token}">copiar link</button></div>`).join("") : '<div class="vazio">Nenhum. Crie em Alunos → + Convite.</div>'}</div></div>
-      <div class="secao"><div class="eyebrow">Sobre</div><p class="small muted">Versão ${PF_CONFIG.VERSAO} · Supabase: ${PF_CONFIG.SUPABASE_URL.includes("SEU-PROJETO") ? "não configurado (edite config.js)" : "conectado"}<br>Restrições de saúde e observações privadas nunca saem do papel professor. Consentimentos versionados por tipo.</p><button class="btn" id="sair">Sair</button></div>`;
+      <div class="secao"><div class="eyebrow">Sobre</div><p class="small muted">Versão ${PF_CONFIG.VERSAO} · Supabase: ${PF_CONFIG.SUPABASE_URL.includes("SEU-PROJETO") ? "não configurado (edite config.js)" : "conectado"}<br>Restrições de saúde e observações privadas nunca saem do papel professor. Consentimentos versionados por tipo.</p><div class="acoes"><button class="btn" id="trocar-senha">Trocar minha senha</button><button class="btn" id="sair">Sair</button></div></div>`;
+    $("#trocar-senha", ac).onclick = trocarSenha;
     $("#salvar-cfg", ac).onclick = () => { cfg.antecedencia = Number($("#cfg-ant", ac).value); toast("Política salva."); };
     $$(".cp", ac).forEach((b) => (b.onclick = () => copiar(linkEntrevista(b.dataset.tk), "Link copiado.")));
     $("#sair", ac).onclick = async () => { await sb.auth.signOut(); location.reload(); };
   }
 };
+
+function trocarSenha() {
+  const corpo = abrirModal("Trocar senha", `<form class="form" id="fsenha"><label>Nova senha (mínimo 8 caracteres)<input type="password" name="s1" minlength="8" required autocomplete="new-password"></label><label>Repita a nova senha<input type="password" name="s2" minlength="8" required autocomplete="new-password"></label><button class="btn primario" type="submit">Salvar nova senha</button></form>`);
+  $("#fsenha", corpo).onsubmit = async (e) => { e.preventDefault(); const d = formDados(e.target); if (d.s1 !== d.s2) return toast("As senhas não conferem."); const { error } = await sb.auth.updateUser({ password: d.s1 }); if (error) return toast("Não foi possível trocar: " + error.message, 5000); toast("Senha trocada."); fecharModal(); };
+}
 
 // ---------------------------------------------------------------- 7. formulários
 async function formAluno(a = null) {
@@ -555,7 +617,7 @@ function formPlano() {
 
 async function formSessao(pre = {}) {
   const [{ data: alunos }, { data: mods }] = await Promise.all([db.alunos(), db.modalidades()]);
-  const agora = new Date(); agora.setMinutes(0, 0, 0); agora.setHours(agora.getHours() + 1);
+  const agora = pre.inicio ? new Date(pre.inicio) : new Date(); if (!pre.inicio) { agora.setMinutes(0, 0, 0); agora.setHours(agora.getHours() + 1); }
   const corpo = abrirModal("Marcar sessão", `
     <form class="form" id="fs">
       <label>Aluno<select name="aluno_id" required>${(alunos || []).filter((x) => x.status === "ativo").map((x) => `<option value="${x.id}" ${pre.aluno_id === x.id ? "selected" : ""}>${esc(x.nome)}</option>`).join("")}</select></label>

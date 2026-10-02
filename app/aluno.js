@@ -36,7 +36,7 @@ const db = {
 };
 
 // ---------------------------------------------------------------- 3. acesso / login
-const codigo = new URLSearchParams(location.search).get("c") || "";
+const codigo = new URLSearchParams(location.search).get("c") || (PF_CONFIG.DEMO && !sessionStorage.getItem("pf_demo_aluno_ok") ? "DEMO" : "");
 let modoCriar = false, infoCodigo = null;
 function mostrarLogin(msg = "") {
   $("#app").hidden = true; $("#tela-login").hidden = false;
@@ -168,9 +168,10 @@ telas.eu = async (root) => {
     <div class="secao"><div class="eyebrow">Combinados aceitos</div>${(cons || []).length ? cons.map((c) => `<div class="tec"><span>${lab(c.tipo)}${c.opcao_imagem ? ` <span class="muted small">(${lab(c.opcao_imagem)})</span>` : ""}</span><span class="chip ${c.aceito ? "realizada" : ""}">${c.aceito ? "aceito" : "não"} · ${fmtData(c.aceito_em)}</span></div>`).join("") : '<div class="vazio">Nenhum registro.</div>'}
       <p class="small muted">Para pedir cópia, correção ou exclusão dos seus dados, fale com o professor.</p></div>
     <div class="secao"><div class="eyebrow">Professor</div><div class="small">${esc(prof.nome || "")}</div>${prof.telefone ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/55${prof.telefone.replace(/\D/g, "")}">WhatsApp do professor</a>` : ""}</div>
-    <button class="btn" id="sair" style="margin-top:24px">Sair</button>
+    <div class="acoes" style="margin-top:24px"><button class="btn" id="trocar-senha">Trocar senha</button><button class="btn" id="sair">Sair</button></div>
     <p class="small muted" style="text-align:center">Versão ${PF_CONFIG.VERSAO}</p>`;
-  $("#sair", root).onclick = async () => { await sb.auth.signOut(); location.href = location.pathname; };
+  $("#trocar-senha", root).onclick = () => { const corpo = abrirModal("Trocar senha", `<form class="form" id="fsenha"><label>Nova senha (mínimo 8 caracteres)<input type="password" name="s1" minlength="8" required></label><label>Repita<input type="password" name="s2" minlength="8" required></label><button class="btn primario" type="submit">Salvar</button></form>`); $("#fsenha", corpo).onsubmit = async (e) => { e.preventDefault(); const f = e.target; if (f.s1.value !== f.s2.value) return toast("As senhas não conferem."); const { error } = await sb.auth.updateUser({ password: f.s1.value }); if (error) return toast("Não foi possível trocar: " + error.message); toast("Senha trocada."); fecharModal(); }; };
+  $("#sair", root).onclick = async () => { await sb.auth.signOut(); try { sessionStorage.removeItem("pf_demo_aluno_ok"); } catch {} location.reload(); };
 };
 
 // ---------------------------------------------------------------- 8. boot
@@ -182,7 +183,7 @@ async function boot() {
   if (codigo && infoCodigo?.valido) {
     const { error } = await sb.rpc("acesso_resgatar", { p_token: codigo });
     if (error) return mostrarLogin("Código não pôde ser vinculado: " + error.message);
-    infoCodigo.valido = false; history.replaceState(null, "", location.pathname); toast("Acesso vinculado.");
+    infoCodigo.valido = false; try { history.replaceState(null, "", location.pathname); } catch {} try { sessionStorage.setItem("pf_demo_aluno_ok", "1"); } catch {} toast("Acesso vinculado.");
   }
   const { data: al } = await db.meusAlunos();
   alunos = al || [];
