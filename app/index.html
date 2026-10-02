@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1113">
+<title>Personal Fight — Professor</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===================== LOGIN ===================== -->
+<section id="tela-login" class="tela" hidden>
+  <div class="login-box">
+    <div class="eyebrow">Personal Fight</div>
+    <h1>Professor</h1>
+    <form id="form-login" class="form">
+      <label>E-mail<input type="email" name="email" required autocomplete="username"></label>
+      <label>Senha<input type="password" name="senha" required autocomplete="current-password"></label>
+      <button class="btn primario" type="submit">Entrar</button>
+      <p id="login-erro" class="erro" hidden></p>
+    </form>
+    <p class="muted small">Sem conta? O acesso é criado pelo administrador.</p>
+  </div>
+</section>
+
+<!-- ===================== APP ===================== -->
+<div id="app" hidden>
+  <header class="topo">
+    <div>
+      <div class="sub" id="topo-sub"></div>
+      <h1 id="topo-titulo">Hoje</h1>
+    </div>
+    <div id="topo-acao"></div>
+  </header>
+
+  <main id="conteudo"></main>
+
+  <nav class="tabs">
+    <button data-tela="hoje" class="ativo">Hoje</button>
+    <button data-tela="alunos">Alunos</button>
+    <button data-tela="diarios">Diários</button>
+    <button data-tela="acervo">Acervo</button>
+  </nav>
+</div>
+
+<!-- ===================== MODAL ===================== -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-caixa">
+    <div class="modal-topo"><div><div class="eyebrow" id="modal-eyebrow"></div><h2 id="modal-titulo"></h2></div><button id="modal-fechar" class="link">fechar</button></div>
+    <div id="modal-corpo"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

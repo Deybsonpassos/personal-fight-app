@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1113">
+<title>Entrevista inicial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  main { padding: 0 16px 60px; }
+  .prog { display: flex; gap: 4px; margin: 6px 0 14px; } .prog i { flex: 1; height: 3px; background: var(--card2); } .prog i.on { background: var(--accent); }
+  .q { display: block; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; }
+  .q .h { display: block; font-family: var(--display); text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--muted2); margin-top: 2px; }
+  .opts { display: flex; flex-direction: column; gap: 6px; } .opts.grid { display: grid; grid-template-columns: 1fr 1fr; }
+  .opt { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line2); padding: 11px 12px; cursor: pointer; font-size: 14px; line-height: 1.3; margin: 0; }
+  .opt input { accent-color: var(--accent); margin-top: 2px; width: auto; min-height: 0; }
+  .opt:has(input:checked) { border-color: var(--accent); }
+  .ancoras { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .btns { display: flex; gap: 8px; margin-top: 22px; } .btns .btn { margin: 0; flex: 1; }
+  .erro { display: none; margin-top: 10px; }
+  dl { margin: 0; } dt { font-family: var(--mono); font-size: 10px; text-transform: uppercase; color: var(--muted); margin-top: 12px; } dd { margin: 2px 0 0; font-size: 14px; line-height: 1.45; }
+</style>
+</head>
+<body>
+<header class="topo"><div><div class="sub" id="sub">Entrevista inicial</div><h1 id="titulo">Olá</h1></div></header>
+<main><div class="prog" id="prog"></div><div id="tela"><p class="muted">Carregando…</p></div></main>
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+const sb = supabase.createClient(PF_CONFIG.SUPABASE_URL, PF_CONFIG.SUPABASE_ANON_KEY);
+const token = new URLSearchParams(location.search).get("t") || "";
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const KEY = "pf_entrevista_" + token;
+let r = {}; try { r = JSON.parse(sessionStorage.getItem(KEY) || "{}"); } catch {}
+let passo = 0;
+const v = (k) => esc(r[k] || "");
+const opt = (name, vals, tipo = "radio", cls = "") => `<div class="opts ${cls}">${vals.map((x) => { const [val, l, h] = Array.isArray(x) ? x : [x, x]; const ck = tipo === "radio" ? r[name] === val : (r[name] || []).includes(val); return `<label class="opt"><input type="${tipo}" name="${name}" value="${esc(val)}" ${ck ? "checked" : ""}><span>${esc(l)}${h ? `<br><span class="small muted">${esc(h)}</span>` : ""}</span></label>`; }).join("")}</div>`;
+const escala = (name, a, b) => `<div class="escala">${[1,2,3,4,5].map((n) => `<label><input type="radio" name="${name}" value="${n}" ${String(r[name]) === String(n) ? "checked" : ""}><span>${n}</span></label>`).join("")}</div><div class="ancoras"><span>${a}</span><span>${b}</span></div>`;
+const MOTIVOS = [["condicionamento","Condicionamento e emagrecimento"],["defesa","Defesa pessoal"],["competir","Competir"],["tecnica","Aprender a arte, evoluir na técnica"],["saude_mental","Descarregar, saúde mental"],["hobby","Hobby e diversão"],["outro","Outro"]];
+const brParaIso = (t) => { const m = String(t || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/); if (!m) return null; const d = new Date(+m[3], +m[2] - 1, +m[1]); return d.getMonth() === +m[2] - 1 && d.getDate() === +m[1] ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+const idade = (n) => { if (!n) return null; const d = new Date(n), h = new Date(); let i = h.getFullYear() - d.getFullYear(); if (h < new Date(h.getFullYear(), d.getMonth(), d.getDate())) i--; return i; };
+document.addEventListener("input", (e) => { if (e.target.name === "nascimento_txt") { let x = e.target.value.replace(/\D/g, "").slice(0, 8); if (x.length > 4) x = x.slice(0, 2) + "/" + x.slice(2, 4) + "/" + x.slice(4); else if (x.length > 2) x = x.slice(0, 2) + "/" + x.slice(2); e.target.value = x; } });
+function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(t._x); t._x = setTimeout(() => (t.hidden = true), 3000); }
+
+const telas = [
+  { t: "Quem é você", html: () => `
+    <label class="q">Nome completo<input type="text" name="nome" value="${v("nome")}" required autocomplete="name"></label>
+    <div class="duas"><label class="q">Como gosta de ser chamado(a)<input type="text" name="apelido" value="${v("apelido")}"></label>
+    <label class="q">Data de nascimento <span class="h">dia/mês/ano</span><input type="text" name="nascimento_txt" value="${v("nascimento_txt")}" inputmode="numeric" placeholder="10/03/1995" maxlength="10" required></label></div>
+    <label class="q">WhatsApp<input type="tel" name="telefone" value="${v("telefone")}" inputmode="tel" required></label>
+    <label class="q">E-mail <span class="h">para o e-mail de boas-vindas e o acesso ao app</span><input type="email" name="email" value="${v("email")}" inputmode="email" autocomplete="email" required></label>
+    <label class="q">Como você chegou até o professor? <span class="h">opcional</span><input type="text" name="origem" value="${v("origem")}" placeholder="indicação de fulano, Instagram, vizinho..."></label>
+    <div class="erro" id="erro-idade">Data inválida ou menor de 18. Esta entrevista é para adultos; para menor de idade, o responsável faz o cadastro com o professor.</div>`,
+    ok: () => { r.nascimento = brParaIso(r.nascimento_txt); const i = idade(r.nascimento); if (!(i >= 18 && i < 100)) { $("#erro-idade").style.display = "block"; return false; } return !!(r.nome && r.telefone && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(r.email || "")); } },
+  { t: "Modalidade e experiência", html: () => `
+    <label class="q">O que você quer treinar?</label>${opt("modalidades", [["muay_thai","Muay Thai"],["kickboxing","Kickboxing"]], "checkbox", "grid")}
+    <label class="q">Já treinou luta antes?</label>${opt("experiencia", [["nunca","Nunca"],["menos_1","Sim, menos de 1 ano"],["1_3","Sim, de 1 a 3 anos"],["mais_3","Sim, mais de 3 anos"]])}
+    <label class="q">Se sim: qual modalidade, graduação e onde? <span class="h">Deixe em branco se nunca treinou.</span><input type="text" name="experiencia_detalhe" value="${v("experiencia_detalhe")}"></label>
+    <label class="q">Pratica ou praticou outro esporte com regularidade?<input type="text" name="outros_esportes" value="${v("outros_esportes")}" placeholder="corrida, musculação, futebol..."></label>`,
+    ok: () => (r.modalidades || []).length > 0 && !!r.experiencia },
+  { t: "Seu objetivo", html: () => `
+    <label class="q">Por que você quer treinar agora? <span class="h">Marque até 3.</span></label>${opt("motivos", MOTIVOS, "checkbox")}
+    <label class="q">Se tivesse que escolher um só, qual é o principal?<select name="motivo_principal"><option value="">escolha</option>${MOTIVOS.map(([k,l]) => `<option value="${k}" ${r.motivo_principal === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    <label class="q">Em uma frase, o que você quer ter conseguido daqui a alguns meses?<textarea name="objetivo_frase" placeholder="ex.: perder 8 kg e aguentar 3 rounds sem parar">${v("objetivo_frase")}</textarea></label>
+    <label class="q">Em quanto tempo?</label>${opt("horizonte", [["3m","3 meses"],["6m","6 meses"],["1a","1 ano"],["sem_prazo","Sem prazo, quero manter"]], "radio", "grid")}
+    <label class="q">O que você mais quer aprender ou melhorar primeiro? <span class="h">Até 3.</span></label>${opt("prioridades", [["base","Base e postura"],["socos","Socos e combinações"],["chutes","Chutes"],["joelhos_cotovelos","Joelhos e cotovelos"],["clinch","Clinch"],["defesa_esquiva","Defesa e esquiva"],["condicionamento","Condicionamento físico"],["sparring","Sparring / troca"]], "checkbox", "grid")}`,
+    ok: () => { const m = r.motivos || []; return m.length > 0 && m.length <= 3 && m.includes(r.motivo_principal) && !!r.horizonte && (r.prioridades || []).length > 0 && (r.prioridades || []).length <= 3; } },
+  { t: "Seu corpo hoje", html: () => `
+    <label class="q">Como você avalia seu condicionamento físico hoje?</label>${escala("condicionamento", "canso subindo escada", "treino pesado toda semana")}
+    <label class="q">Algum movimento é difícil ou dói hoje?</label>${opt("movimentos", [["agachar","Agachar"],["girar_tronco","Girar o tronco / quadril"],["bracos_acima","Levantar braços acima da cabeça"],["pescoco","Girar o pescoço"],["impacto","Correr / saltar (impacto)"],["nenhum","Nenhum"]], "checkbox", "grid")}
+    <label class="q">Lesão, cirurgia recente, pressão alta, problema no coração, gravidez ou outra condição que o professor precise saber para a aula? <span class="h">Só o que muda a conduta na aula. Fica visível apenas para o professor, em registro separado.</span><textarea name="saude" placeholder="deixe em branco se não houver">${v("saude")}</textarea></label>
+    <div class="duas"><label class="q">Peso (kg) <span class="h">opcional</span><input type="number" name="peso" value="${v("peso")}" inputmode="decimal" step="0.1"></label><label class="q">Altura (cm) <span class="h">opcional</span><input type="number" name="altura" value="${v("altura")}" inputmode="numeric"></label></div>`,
+    ok: () => !!r.condicionamento && (r.movimentos || []).length > 0 },
+  { t: "Onde e quando", html: () => `
+    <label class="q">Onde você prefere treinar?</label>${opt("local", [["casa","Na minha casa"],["condominio","Área comum do meu condomínio"],["praca","Praça ou parque perto de mim"],["outro","Outro lugar"]])}
+    <label class="q">Endereço para as aulas <span class="h">Rua, número, bairro, referência</span><input type="text" name="endereco" value="${v("endereco")}" required></label>
+    <label class="q">Como é o espaço?</label>${opt("espaco", [["amplo","Área livre, dá para se mover (uns 3 × 3 m ou mais)"],["apertado","Apertado, mas dá para treinar parado"],["nao_sei","Não sei dizer"]])}
+    <label class="q">Piso</label>${opt("piso", [["ceramica","Cerâmica / porcelanato"],["madeira","Madeira / laminado"],["tatame","Tatame ou EVA"],["grama","Grama / terra"]], "radio", "grid")}
+    <label class="q">O que você já tem de equipamento?</label>${opt("equipamento", [["luvas","Luvas"],["bandagem","Bandagens"],["caneleira","Caneleiras"],["bucal","Protetor bucal"],["corda","Corda de pular"],["nenhum","Nada ainda"]], "checkbox", "grid")}
+    <label class="q">Quantas sessões por semana?</label>${opt("frequencia", [["1","1"],["2","2"],["3","3"],["4","4 ou mais"]], "radio", "grid")}
+    <label class="q">Dias e horários que funcionam para você <span class="h">Ex.: seg e qua às 7h, ou qualquer noite depois das 19h</span><input type="text" name="horarios" value="${v("horarios")}" required></label>
+    <label class="q">Toparia treinar em dupla, com alguém da sua casa ou condomínio?</label>${opt("dupla", [["nao","Prefiro sozinho(a)"],["talvez","Depende de quem"],["sim","Sim, gosto da ideia"]])}
+    <label class="q">Toparia fazer tarefas curtas entre as sessões? <span class="h">5 a 15 min: vídeo, sombra, alongamento</span></label>${opt("tarefas", [["diario","Sim, todo dia"],["2_3","Sim, 2 ou 3 vezes na semana"],["nao","Prefiro só na aula"]])}`,
+    ok: () => !!r.local && !!r.endereco && !!r.espaco && !!r.piso && (r.equipamento || []).length > 0 && !!r.frequencia && !!r.horarios },
+  { t: "Combinados", html: () => `
+    <p class="muted small">Textos provisórios. A versão final passa por revisão jurídica.</p>
+    <label class="q">Contato de emergência</label><div class="duas"><input type="text" name="emerg_nome" value="${v("emerg_nome")}" placeholder="nome e parentesco" required><input type="tel" name="emerg_tel" value="${v("emerg_tel")}" placeholder="telefone" inputmode="tel" required></div>
+    <label class="q">Política de marcação</label>
+    <label class="opt"><input type="checkbox" name="aceite_politica" ${r.aceite_politica ? "checked" : ""}><span class="small">Entendi que cancelamento com menos de <b>${PF_CONFIG.ANTECEDENCIA_CANCELAMENTO_HORAS} horas</b> de antecedência e falta sem aviso contam como sessão realizada, e que cancelamento pelo professor não conta.</span></label>
+    <label class="q">Gravação das sessões <span class="h">O professor grava as sessões para registrar o que foi treinado e acompanhar sua evolução. O vídeo fica guardado com acesso restrito ao professor.</span></label>
+    ${opt("imagem", [["interno","Autorizo, só para uso interno de correção e registro"],["interno_redes","Autorizo, inclusive para redes sociais do professor"],["nao","Não autorizo gravação"]])}
+    <label class="opt" style="margin-top:14px"><input type="checkbox" name="aceite_dados" ${r.aceite_dados ? "checked" : ""}><span class="small">Concordo que estes dados sejam usados pelo professor para planejar e acompanhar meu treino. Posso pedir cópia ou exclusão a qualquer momento.</span></label>`,
+    ok: () => !!r.emerg_nome && !!r.emerg_tel && !!r.aceite_politica && !!r.imagem && !!r.aceite_dados },
+];
+
+function coletar() { const f = $("#form"); if (!f) return; const fd = new FormData(f); const o = {}; fd.forEach((val, k) => { o[k] = k in o ? [].concat(o[k], val) : val; }); f.querySelectorAll("input[type=checkbox]").forEach((c) => { if (c.value === "on") o[c.name] = c.checked; else o[c.name] = Array.from(f.querySelectorAll(`input[name="${c.name}"]:checked`)).map((x) => x.value); }); Object.assign(r, o); try { sessionStorage.setItem(KEY, JSON.stringify(r)); } catch {} }
+function render() {
+  $("#prog").innerHTML = telas.map((_, i) => `<i class="${i <= passo ? "on" : ""}"></i>`).join("");
+  const t = telas[passo];
+  $("#titulo").textContent = t.t; $("#sub").textContent = `Etapa ${passo + 1} de ${telas.length}`;
+  $("#tela").innerHTML = `<form id="form" class="form">${t.html()}<div class="btns">${passo > 0 ? '<button type="button" class="btn" id="voltar">Voltar</button>' : ""}<button type="submit" class="btn primario">${passo === telas.length - 1 ? "Enviar" : "Continuar"}</button></div><div class="erro" id="erro">Faltou responder algo obrigatório nesta etapa.</div></form>`;
+  $("#form").onsubmit = async (e) => { e.preventDefault(); coletar(); if (!t.ok()) { $("#erro").style.display = "block"; return; } if (passo === telas.length - 1) return enviar(); passo++; window.scrollTo(0, 0); render(); };
+  $("#voltar") && ($("#voltar").onclick = () => { coletar(); passo--; render(); });
+  window.scrollTo(0, 0);
+}
+async function enviar() {
+  const b = $("#form button[type=submit]"); b.disabled = true; b.textContent = "Enviando…";
+  const { data, error } = await sb.rpc("entrevista_enviar", { p_token: token, d: r });
+  if (error) { b.disabled = false; b.textContent = "Enviar"; toast("Não foi possível enviar: " + error.message); return; }
+  try { sessionStorage.removeItem(KEY); } catch {}
+  const nome = r.apelido || r.nome.split(" ")[0];
+  $("#prog").innerHTML = ""; $("#sub").textContent = "Entrevista enviada"; $("#titulo").textContent = `Obrigado, ${nome}`;
+  $("#tela").innerHTML = `<p style="font-size:17px;line-height:1.5">Suas respostas chegaram ao professor. Ele monta seu ponto de partida e entra em contato pelo WhatsApp para combinar a primeira sessão.</p>
+    <dl><dt>Treina</dt><dd>${esc((r.modalidades || []).map((m) => ({ muay_thai: "Muay Thai", kickboxing: "Kickboxing" })[m]).join(" e "))}</dd><dt>Objetivo</dt><dd>${esc(r.objetivo_frase || "")}</dd><dt>Frequência</dt><dd>${esc(r.frequencia)}x por semana · ${esc(r.horarios)}</dd></dl>
+    <p class="muted small" style="margin-top:20px">Você pode fechar esta página. Este link não funciona mais depois de enviado.</p>`;
+  window.scrollTo(0, 0);
+}
+async function iniciar() {
+  if (PF_CONFIG.SUPABASE_URL.includes("SEU-PROJETO")) { $("#tela").innerHTML = '<p class="erro" style="display:block">App não configurado (config.js).</p>'; return; }
+  if (!token) { $("#titulo").textContent = "Link inválido"; $("#tela").innerHTML = "<p>Peça ao professor um novo link de entrevista.</p>"; return; }
+  const { data: info, error } = await sb.rpc("entrevista_info", { p_token: token });
+  if (error || !info) { $("#titulo").textContent = "Link inválido"; $("#tela").innerHTML = "<p>Este link não existe. Peça ao professor um novo.</p>"; return; }
+  if (!info.valido) { $("#titulo").textContent = info.usado ? "Já respondida" : "Link expirado"; $("#tela").innerHTML = `<p>${info.usado ? "Esta entrevista já foi enviada. Obrigado!" : "Este link expirou. Peça ao professor um novo."}</p>`; return; }
+  $("#tela").innerHTML = `<p style="font-size:17px;line-height:1.5">${info.rotulo ? `Olá, <b>${esc(info.rotulo)}</b>. ` : ""}Antes da primeira aula, o professor precisa te conhecer: uns 5 minutos, 6 etapas. Suas respostas vão só para ele.</p><button class="btn primario" id="comecar">Começar</button>`;
+  $("#comecar").onclick = () => { passo = 0; render(); };
+}
+iniciar();
+</script>
+</body>
+</html>

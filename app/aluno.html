@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1113">
+<title>Meu treino</title>
+<link rel="manifest" href="aluno.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .video { height: 170px; background: var(--card); border: 1px solid var(--line); position: relative; display: grid; place-items: center; margin-top: 8px; }
+  .video .trilha { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--line); } .video .trilha i { display: block; height: 100%; background: var(--accent); }
+  .video .mk { position: absolute; bottom: 8px; width: 2px; height: 10px; background: var(--red); }
+  .video .cab { position: absolute; top: 8px; left: 10px; } .video .msg { font-family: var(--mono); font-size: 11px; color: var(--muted2); text-transform: uppercase; }
+  .marc { border: 1px solid var(--line); margin-top: 12px; } .marc div { display: flex; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); align-items: center; font-size: 14px; } .marc div:last-child { border-bottom: 0; }
+  .marc .t { font-family: var(--mono); font-size: 12px; color: var(--muted); width: 44px; flex: none; } .marc .k { font-family: var(--mono); font-size: 10px; color: var(--muted); flex: none; } .marc .corr .t, .marc .corr .k { color: var(--accent); }
+  .marc .x { flex: 1; }
+  .sel { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; } .sel button { background: var(--card2); border: 0; color: var(--ink); padding: 6px 10px; font-size: 13px; } .sel button.on { background: var(--accent); color: var(--accent-ink); }
+</style>
+</head>
+<body>
+<section id="tela-login" class="tela" hidden>
+  <div class="login-box">
+    <div class="eyebrow" id="login-eyebrow">Meu treino</div>
+    <h1 id="login-titulo">Entrar</h1>
+    <p class="small muted" id="login-texto"></p>
+    <form id="form-login" class="form">
+      <label>E-mail<input type="email" name="email" required autocomplete="username"></label>
+      <label>Senha<input type="password" name="senha" required minlength="6" autocomplete="current-password"></label>
+      <button class="btn primario" type="submit" id="login-btn">Entrar</button>
+      <button class="btn" type="button" id="alternar">Criar conta com o código</button>
+      <p id="login-erro" class="erro" hidden></p>
+    </form>
+    <p class="muted small" id="login-rodape">Sem código de acesso? Peça ao professor.</p>
+  </div>
+</section>
+
+<div id="app" hidden>
+  <header class="topo"><div><div class="sub" id="topo-sub"></div><h1 id="topo-titulo"></h1></div><div id="topo-acao"></div></header>
+  <main id="conteudo"></main>
+  <nav class="tabs">
+    <button data-tela="agenda" class="ativo">Agenda</button>
+    <button data-tela="diarios">Diários</button>
+    <button data-tela="tecnicas">Técnicas</button>
+    <button data-tela="eu">Eu</button>
+  </nav>
+</div>
+
+<div id="modal" class="modal" hidden><div class="modal-caixa"><div class="modal-topo"><div><div class="eyebrow" id="modal-eyebrow"></div><h2 id="modal-titulo"></h2></div><button id="modal-fechar" class="link">fechar</button></div><div id="modal-corpo"></div></div></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="aluno.js"></script>
+</body>
+</html>
