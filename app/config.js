@@ -1,9 +1,2 @@
-// Preencha com os dados do seu projeto Supabase (Project Settings → API).
-// Use SOMENTE a chave "anon / public". Nunca coloque a service_role aqui.
-window.PF_CONFIG = {
-  SUPABASE_URL: "https://SEU-PROJETO.supabase.co",
-  SUPABASE_ANON_KEY: "COLE_AQUI_A_CHAVE_ANON",
-  VERSAO: "0.3.0",
-  // Política padrão (também editável em Ajustes; fica salva no navegador do professor)
-  ANTECEDENCIA_CANCELAMENTO_HORAS: 12,
-};
+// Projeto Supabase personal-fight (Sao Paulo). Chave PUBLICAVEL (anon): seguranca fica nas politicas RLS do banco. NUNCA colocar aqui a chave secreta.
+window.PF_CONFIG = { SUPABASE_URL: "https://medgsedysucmznzebglw.supabase.co", SUPABASE_ANON_KEY: "sb_publishable_myTd6nuAxjOcdDL0ZTPBIQ_TJcd7HUb", VERSAO: "0.3.0", ANTECEDENCIA_CANCELAMENTO_HORAS: 12 };
