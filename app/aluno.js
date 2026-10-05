@@ -1,3 +1,6 @@
+// Evita envio duplicado por toque repetido
+(() => { const d = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "onsubmit"); if (!d?.set) return;
+  Object.defineProperty(HTMLFormElement.prototype, "onsubmit", { configurable: true, get() { return d.get.call(this); }, set(fn) { d.set.call(this, fn && (async function (e) { if (this.dataset.enviando) { e.preventDefault(); return; } this.dataset.enviando = "1"; const bs = [...this.querySelectorAll("button")].filter((b) => !b.disabled); bs.forEach((b) => (b.disabled = true)); try { return await fn.call(this, e); } finally { delete this.dataset.enviando; bs.forEach((b) => (b.disabled = false)); } })); } }); })();
 /* =====================================================================
    Personal Fight — app do ALUNO / RESPONSÁVEL (Sprint 3 · pele B · Corner)
    Só leitura: o aluno vê agenda, diários, técnicas e o próprio perfil.
@@ -16,6 +19,8 @@ const fmtHora = (d) => new Date(d).toLocaleTimeString("pt-BR", { hour: "2-digit"
 const fmtData = (d) => new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 const fmtCurta = (d) => { const x = new Date(d); return `${DIAS[x.getDay()]} ${String(x.getDate()).padStart(2, "0")}.${String(x.getMonth() + 1).padStart(2, "0")}`; };
 const primeiroNome = (n) => (n || "").split(" ")[0], up = (s) => String(s || "").toUpperCase();
+const fmtReais = (c) => (Number(c || 0) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const PERIODO_LABEL = { 1: "Mensal", 3: "Trimestral", 6: "Semestral", 12: "Anual" };
 const S = (n) => "S" + String(n).padStart(3, "0");
 let toastTimer; function toast(m, ms = 2800) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms); }
 function abrirModal(titulo, html, eyebrow = "") { $("#modal-eyebrow").textContent = eyebrow; $("#modal-titulo").textContent = titulo; $("#modal-corpo").innerHTML = html; $("#modal").hidden = false; $(".modal-caixa").scrollTop = 0; return $("#modal-corpo"); }
@@ -33,6 +38,7 @@ const db = {
   tecnicas: (aid) => sb.from("alunos_tecnicas").select("*").eq("aluno_id", aid).order("atualizado_em", { ascending: false }),
   consentimentos: (aid) => sb.from("consentimentos").select("*").eq("aluno_id", aid).is("revogado_em", null).order("aceito_em", { ascending: false }),
   professor: async () => { const { data } = await sb.rpc("professor_contato"); return data || {}; },
+  cobrancas: (aid) => sb.from("v_cobrancas").select("*").eq("aluno_id", aid).order("vence_em", { ascending: false }).limit(40),
 };
 
 // ---------------------------------------------------------------- 3. acesso / login
@@ -173,6 +179,61 @@ telas.eu = async (root) => {
   $("#trocar-senha", root).onclick = () => { const corpo = abrirModal("Trocar senha", `<form class="form" id="fsenha"><label>Nova senha (mínimo 8 caracteres)<input type="password" name="s1" minlength="8" required></label><label>Repita<input type="password" name="s2" minlength="8" required></label><button class="btn primario" type="submit">Salvar</button></form>`); $("#fsenha", corpo).onsubmit = async (e) => { e.preventDefault(); const f = e.target; if (f.s1.value !== f.s2.value) return toast("As senhas não conferem."); const { error } = await sb.auth.updateUser({ password: f.s1.value }); if (error) return toast("Não foi possível trocar: " + error.message); toast("Senha trocada."); fecharModal(); }; };
   $("#sair", root).onclick = async () => { await sb.auth.signOut(); try { sessionStorage.removeItem("pf_demo_aluno_ok"); } catch {} location.reload(); };
 };
+
+// ---------------------------------------------------------------- 7b. PLANO (o que está coberto, quando renova, pagar)
+telas.plano = async (root) => {
+  const { data: cb } = await db.cobrancas(aluno.id);
+  const cobs = cb || [], pcs = cache.pcs, ss = cache.sessoes;
+  const abertas = cobs.filter((c) => c.situacao !== "paga"), pacotesAbertos = pcs.filter((p) => !p.pago);
+  const pendentes = [...abertas.map((c) => ({ origem: "cobranca", id: c.id, descricao: c.descricao, valor: c.valor_centavos, vence: c.vence_em, vencida: c.situacao === "vencida", avisou: c.aluno_informou_em })), ...pacotesAbertos.map((p) => ({ origem: "pacote", id: p.id, descricao: p.nome, valor: p.preco_centavos, vence: p.comprado_em, vencida: false, avisou: p.aluno_informou_em }))];
+  const tipo = aluno.cobranca_tipo || "pacote";
+  topo(quem() === "Você" ? "Seu plano com o professor" : `Plano de ${primeiroNome(aluno.nome)}`, "Plano");
+  let card = "";
+  if (tipo === "mensal") {
+    const ult = cobs.find((c) => c.tipo === "mensal");
+    const ini = ult ? new Date(ult.competencia + "T12:00:00") : null, fim = ini ? new Date(ini.getFullYear(), ini.getMonth() + (ult.periodo_meses || 1), 0) : null;
+    const feitas = fim ? ss.filter((x) => x.status === "realizada" && new Date(x.inicio) >= ini && new Date(x.inicio) <= fim).length : 0;
+    const faltas = fim ? ss.filter((x) => (x.status === "falta_sem_aviso") && new Date(x.inicio) >= ini && new Date(x.inicio) <= fim).length : 0;
+    const previstas = fim ? ss.filter((x) => x.status === "agendada" && new Date(x.inicio) >= new Date() && new Date(x.inicio) <= fim).length : 0;
+    const tot = Math.max(feitas + faltas + previstas, 1);
+    card = `<div class="plano-card"><div class="n">${PERIODO_LABEL[aluno.periodo_meses || 1]}${aluno.frequencia_semana ? ` · ${aluno.frequencia_semana}x por semana` : ""}</div>
+      <div class="d">${fmtReais(aluno.valor_centavos)} por ${{ 1: "mês", 3: "trimestre", 6: "semestre", 12: "ano" }[aluno.periodo_meses || 1]}${fim ? ` · período até ${fmtData(fim)} · renova dia ${aluno.dia_vencimento || 5}` : " · ainda sem período gerado"}</div>
+      ${fim ? `<div class="barra"><i style="width:${(feitas / tot) * 100}%;background:var(--accent)"></i><i style="width:${(faltas / tot) * 100}%;background:#ffc24d"></i></div><div class="legenda"><span><i style="background:var(--accent)"></i>${feitas} feitas</span>${faltas ? `<span><i style="background:#ffc24d"></i>${faltas} falta(s)</span>` : ""}<span><i style="background:var(--line)"></i>${previstas} marcadas até o fim</span></div>` : ""}</div>`;
+  } else if (tipo === "pacote") {
+    const pacotesAtivos = pcs.filter((p) => p.pago && !p.vencido && p.sessoes_restantes > 0), p = pacotesAtivos[0] || pcs.find((x) => x.pago) || null;
+    card = p ? `<div class="plano-card"><div class="n">${esc(p.nome)}</div><div class="d">${fmtReais(p.preco_centavos)} · ${p.sessoes_restantes} de ${p.sessoes_total} aulas restantes${p.vence_em ? ` · válido até ${fmtData(p.vence_em)}` : ""}${p.vencido ? " · VENCIDO" : ""}</div>
+      <div class="barra"><i style="width:${(p.sessoes_consumidas / p.sessoes_total) * 100}%;background:var(--accent)"></i></div><div class="legenda"><span><i style="background:var(--accent)"></i>${p.sessoes_consumidas} usadas</span><span><i style="background:var(--line)"></i>${p.sessoes_restantes} cobertas</span></div></div>`
+      : `<div class="plano-card"><div class="n">Pacote de aulas</div><div class="d">nenhum pacote ativo — combine com o professor</div></div>`;
+  } else {
+    const semPagar = abertas.filter((c) => c.tipo === "sessao").length;
+    card = `<div class="plano-card"><div class="n">Por aula</div><div class="d">${fmtReais(aluno.valor_centavos)} por aula realizada · ${semPagar ? `<span class="vermelho">${semPagar} aula(s) em aberto</span>` : "nada em aberto"}</div></div>`;
+  }
+  const item = (x) => `<div class="tec abre-pag" data-o="${x.origem}" data-id="${x.id}"><span>${esc(x.descricao)}<br><span class="muted small">${fmtReais(x.valor)} · ${x.vencida ? "<span class='vermelho'>venceu " + fmtData(x.vence) + "</span>" : "vence " + fmtData(x.vence)}${x.avisou ? " · você avisou que pagou" : ""}</span></span><span class="chip ${x.vencida ? "falta_sem_aviso" : "agendada"}">${x.avisou ? "aguardando" : x.vencida ? "vencido" : "pagar"}</span></div>`;
+  root.innerHTML = `${card}
+    <div class="secao"><div class="eyebrow">Em aberto</div>${pendentes.map(item).join("") || '<div class="vazio">Nada a pagar. 👊</div>'}</div>
+    ${tipo !== "sessao" ? `<button class="btn primario" id="renovar">${tipo === "mensal" ? "Renovar · gerar próximo período" : "Renovar pacote"}</button>` : ""}
+    <div class="secao"><div class="eyebrow">Histórico</div>${cobs.filter((c) => c.situacao === "paga").slice(0, 12).map((c) => `<div class="tec"><span>${esc(c.descricao)}<br><span class="muted small">${fmtReais(c.valor_centavos)} · pago em ${fmtData(c.pago_em)}${c.forma_pagamento ? " · " + esc(c.forma_pagamento) : ""}</span></span><span class="chip realizada">pago</span></div>`).join("")}${pcs.filter((p) => p.pago).map((p) => `<div class="tec"><span>${esc(p.nome)}<br><span class="muted small">${fmtReais(p.preco_centavos)} · pago em ${fmtData(p.pago_em || p.comprado_em)}</span></span><span class="chip realizada">pago</span></div>`).join("") || (cobs.some((c) => c.situacao === "paga") ? "" : '<div class="vazio">Nenhum pagamento registrado ainda.</div>')}</div>`;
+  $$(".abre-pag", root).forEach((el) => (el.onclick = () => modalPagar(el.dataset.o, el.dataset.id)));
+  $("#renovar", root) && ($("#renovar", root).onclick = async (e) => { e.target.disabled = true; const { data, error } = await sb.rpc("renovar_plano", { p_aluno: aluno.id }); if (error) { e.target.disabled = false; return toast(error.message.replace(/^.*?: /, ""), 5000); } if (data.ja_existia) toast("Já existe uma cobrança em aberto; pague esta."); modalPagar(data.origem, data.id); });
+};
+
+async function modalPagar(origem, id) {
+  const { data: pix } = await sb.rpc("pix_dados", { p_origem: origem, p_id: id });
+  if (!pix || pix.erro) return toast(pix?.erro || "Não foi possível montar o Pix.", 5000);
+  if (pix.pago) { toast("Esta cobrança já está paga."); return render("plano"); }
+  const cod = PF_PIX.codigo(pix);
+  const prof = await db.professor();
+  const corpo = abrirModal(pix.descricao, `
+    <div class="linha-entre"><b class="mono" style="font-size:22px">${fmtReais(pix.valor_centavos)}</b><span class="chip agendada">Pix</span></div>
+    <p class="small muted">Abra o app do seu banco, escolha <b>Pix → ler QR Code</b> ou <b>Pix copia e cola</b>. Favorecido: ${esc(pix.nome)}.</p>
+    <div class="qr-box">${PF_PIX.svg(cod)}</div>
+    <div class="copia mono">${esc(cod)}</div>
+    <div class="acoes"><button class="btn primario" id="cp">Copiar código Pix</button></div>
+    <div class="acoes"><button class="btn" id="paguei">Já paguei</button>${prof.telefone ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/55${prof.telefone.replace(/\D/g, "")}?text=${encodeURIComponent("Oi! Acabei de pagar " + pix.descricao + " (" + fmtReais(pix.valor_centavos) + ") por Pix.")}">Enviar comprovante</a>` : ""}</div>
+    <p class="small muted">"Já paguei" avisa o professor; ele confirma quando o valor aparecer na conta dele.</p>`, "Pagar");
+  $("#cp", corpo).onclick = async () => { try { await navigator.clipboard.writeText(cod); toast("Código copiado. Cole no app do banco."); } catch { prompt("Copie o código:", cod); } };
+  $("#paguei", corpo).onclick = async (e) => { e.target.disabled = true; const { error } = await sb.rpc("informar_pagamento", { p_origem: origem, p_id: id }); if (error) return toast("Não deu: " + error.message); toast("Professor avisado. Obrigado!"); fecharModal(); render("plano"); };
+}
 
 // ---------------------------------------------------------------- 8. boot
 $$(".tabs button").forEach((b) => (b.onclick = () => render(b.dataset.tela)));

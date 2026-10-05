@@ -31,6 +31,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="config.js"></script>
 <script>
+// Evita envio duplicado por toque repetido
+(() => { const d = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "onsubmit"); if (!d?.set) return;
+  Object.defineProperty(HTMLFormElement.prototype, "onsubmit", { configurable: true, get() { return d.get.call(this); }, set(fn) { d.set.call(this, fn && (async function (e) { if (this.dataset.enviando) { e.preventDefault(); return; } this.dataset.enviando = "1"; const bs = [...this.querySelectorAll("button")].filter((b) => !b.disabled); bs.forEach((b) => (b.disabled = true)); try { return await fn.call(this, e); } finally { delete this.dataset.enviando; bs.forEach((b) => (b.disabled = false)); } })); } }); })();
+
 const sb = supabase.createClient(PF_CONFIG.SUPABASE_URL, PF_CONFIG.SUPABASE_ANON_KEY);
 const token = new URLSearchParams(location.search).get("t") || (PF_CONFIG.DEMO ? "DEMO" : "");
 const $ = (s) => document.querySelector(s);

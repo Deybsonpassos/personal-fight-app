@@ -19,6 +19,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const DIAS = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];
 const DIAS_LONGO = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
 const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const PERIODO_LABEL = { 1: "Mensal", 3: "Trimestral", 6: "Semestral", 12: "Anual" };
+const CATEG_DESPESA = { deslocamento: "Deslocamento", equipamento: "Equipamento", aluguel_espaco: "Aluguel de espaço", marketing: "Divulgação", taxas: "Taxas e impostos", outros: "Outros" };
 const STATUS_LABEL = { agendada: "Agendada", realizada: "Realizada", falta_sem_aviso: "Falta sem aviso", cancelada_aluno: "Cancelada pelo aluno", cancelada_professor: "Cancelei eu", remarcada: "Remarcada" };
 const LOCAL_LABEL = { casa_aluno: "Casa do aluno", condominio: "Condomínio", praca: "Praça / parque", outro: "Outro" };
 const AREAS = ["base", "socos", "chutes", "joelhos_cotovelos", "clinch", "defesa_esquiva", "condicionamento", "sparring"];
@@ -46,6 +48,9 @@ function abrirModal(titulo, html, eyebrow = "") { $("#modal-eyebrow").textConten
 function fecharModal() { $("#modal").hidden = true; $("#modal-corpo").innerHTML = ""; }
 $("#modal-fechar").onclick = fecharModal;
 $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") fecharModal(); });
+// Evita envio duplicado: enquanto o onsubmit de um formulário está rodando, toques repetidos em "Salvar" são ignorados
+(() => { const d = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "onsubmit"); if (!d?.set) return;
+  Object.defineProperty(HTMLFormElement.prototype, "onsubmit", { configurable: true, get() { return d.get.call(this); }, set(fn) { d.set.call(this, fn && (async function (e) { if (this.dataset.enviando) { e.preventDefault(); return; } this.dataset.enviando = "1"; const bs = [...this.querySelectorAll("button")].filter((b) => !b.disabled); bs.forEach((b) => (b.disabled = true)); try { return await fn.call(this, e); } finally { delete this.dataset.enviando; bs.forEach((b) => (b.disabled = false)); } })); } }); })();
 function formDados(form) { const o = {}; new FormData(form).forEach((v, k) => { o[k] = typeof v === "string" ? v.trim() : v; }); $$('input[type=checkbox]', form).forEach((c) => { if (c.value === "on") o[c.name] = c.checked; }); return o; }
 async function copiar(texto, msg = "Copiado.") { try { await navigator.clipboard.writeText(texto); toast(msg); } catch { prompt("Copie o texto:", texto); } }
 const cfg = { get antecedencia() { return Number(localStorage.getItem("pf_antecedencia") ?? PF_CONFIG.ANTECEDENCIA_CANCELAMENTO_HORAS); }, set antecedencia(v) { localStorage.setItem("pf_antecedencia", v); } };
@@ -76,6 +81,10 @@ const db = {
   programa: (alunoId) => sb.from("programa_sessoes").select("*").eq("aluno_id", alunoId).order("ordem"),
   alunoTecnicas: (alunoId) => sb.from("alunos_tecnicas").select("*").eq("aluno_id", alunoId).order("atualizado_em", { ascending: false }),
   obs: (sessaoId) => sb.from("sessoes_obs_privadas").select("texto").eq("sessao_id", sessaoId).maybeSingle(),
+  caixa: (de, ate) => sb.from("v_caixa").select("*").gte("data", de.toISOString().slice(0, 10)).lt("data", ate.toISOString().slice(0, 10)).order("data", { ascending: false }),
+  recebimento: async () => { const { data } = await sb.from("config_recebimento").select("*").eq("id", true).maybeSingle(); return data || {}; },
+  cobrancas: (alunoId) => sb.from("v_cobrancas").select("*").eq("aluno_id", alunoId).order("vence_em", { ascending: false }).limit(60),
+  aReceber: () => sb.from("v_a_receber").select("*").order("vence_em"),
   convites: () => sb.from("convites").select("*").is("usado_em", null).gt("expira_em", new Date().toISOString()).order("criado_em", { ascending: false }),
 };
 async function ok(promise, msgErro = "Erro ao salvar") { const { data, error } = await promise; if (error) { console.error(error); toast(`${msgErro}: ${error.message}`, 5000); throw error; } return data; }
@@ -83,7 +92,8 @@ async function ok(promise, msgErro = "Erro ao salvar") { const { data, error } =
 // ---------------------------------------------------------------- 3. HOJE
 const telas = {};
 let telaAtual = "hoje", subHoje = "hoje", semanaBase = inicioSemana(new Date()), mesBase = inicioMes(new Date());
-const TITULOS = { hoje: "Hoje", alunos: "Alunos", diarios: "Diários", acervo: "Acervo" };
+const TITULOS = { hoje: "Hoje", alunos: "Alunos", diarios: "Diários", caixa: "Caixa", acervo: "Acervo" };
+let caixaBase = inicioMes(new Date()), filtroCaixa = "tudo";
 
 async function render(nome = telaAtual) {
   telaAtual = nome;
@@ -100,8 +110,11 @@ const linhaSessao = (s, i) => `${s.numero ? "S" + String(s.numero).padStart(3, "
 
 telas.hoje = async (root) => {
   const hoje = inicioDia(new Date());
-  const [{ data: ss }, { data: pend }] = await Promise.all([db.sessoes(hoje, addDias(hoje, 1)), db.pendencias()]);
+  const [{ data: ss }, { data: pend }, { data: recb }] = await Promise.all([db.sessoes(hoje, addDias(hoje, 1)), db.pendencias(), db.aReceber()]);
   const sessoes = ss || [], pendentes = (pend || []).filter((p) => inicioDia(new Date(p.inicio)).getTime() !== hoje.getTime());
+  const receber = recb || [], vencidas = receber.filter((r) => r.vencida), somaV = vencidas.reduce((t, r) => t + r.valor_centavos, 0), somaA = receber.reduce((t, r) => t + r.valor_centavos, 0) - somaV;
+  const blocoReceber = `<div class="secao"><div class="eyebrow">A receber</div><div class="item" id="ver-receber"><div class="t"><b>${vencidas.length ? `<span class="vermelho">${fmtReais(somaV)} vencido</span> · ` : ""}${fmtReais(somaA)} a vencer</b><span>${receber.length ? `${receber.length} lançamento(s) · ${[...new Set(receber.map((r) => primeiroNome(r.aluno_nome)))].slice(0, 4).join(", ")}` : "ninguém devendo"}</span></div><button class="link">ver</button></div><button class="btn" id="gerar-mens">Gerar mensalidades de ${MESES_LONGO[hoje.getMonth()].toLowerCase()}</button></div>`;
+  const ligaReceber = (corpo) => { $("#ver-receber", corpo).onclick = () => { filtroCaixa = "aberto"; render("caixa"); }; $("#gerar-mens", corpo).onclick = async (e) => { e.target.disabled = true; const n = await ok(sb.rpc("gerar_mensalidades")); toast(n ? `${n} mensalidade(s) gerada(s).` : "Mensalidades do mês já geradas (ou nenhum aluno mensal com valor)."); render("hoje"); }; };
   topo(`${fmtCurta(hoje)} · ${sessoes.length} ${sessoes.length === 1 ? "sessão" : "sessões"}`, "Hoje", pendentes.length ? `<button class="badge" id="ir-pend">${pendentes.length} pendente${pendentes.length > 1 ? "s" : ""}</button>` : `<span class="badge cinza">em dia</span>`);
   $("#ir-pend") && ($("#ir-pend").onclick = () => render("diarios"));
 
@@ -112,7 +125,7 @@ telas.hoje = async (root) => {
 
   const corpo = $("#hoje-corpo", root);
   const prox = sessoes.find((s) => s.status === "agendada") || sessoes[0];
-  if (!prox) { corpo.innerHTML = `<div class="bloco"><div class="pad vazio">Nenhuma sessão hoje. Veja a semana ou marque uma avulsa.</div></div><button class="btn" id="avulsa">+ Sessão avulsa</button>`; $("#avulsa", corpo).onclick = () => formSessao(); return; }
+  if (!prox) { corpo.innerHTML = `<div class="bloco"><div class="pad vazio">Nenhuma sessão hoje. Veja a semana ou marque uma avulsa.</div></div><button class="btn" id="avulsa">+ Sessão avulsa</button>${blocoReceber}`; $("#avulsa", corpo).onclick = () => formSessao(); ligaReceber(corpo); return; }
 
   // destaque: dados do aluno da próxima sessão
   const [{ data: hist }, { data: prog }, { data: tecs }] = await Promise.all([db.sessoesAluno(prox.aluno_id, 60), db.programa(prox.aluno_id), db.alunoTecnicas(prox.aluno_id)]);
@@ -143,7 +156,8 @@ telas.hoje = async (root) => {
       ${outras.map((s) => `<div class="item" data-id="${s.id}"><div class="hora">${fmtHora(s.inicio)}</div><div class="t"><b>${esc(s.alunos?.nome)}${s.alunos?.nascimento && idadeDe(s.alunos.nascimento) < 18 ? ' <span class="muted small">kids</span>' : ""}</b></div><div class="dir">${esc(up(s.modalidades?.nome || ""))}${s.locais?.apelido ? " · " + esc(up(s.locais.apelido)) : ""}${s.status !== "agendada" ? "<br>" + up(STATUS_LABEL[s.status]) : ""}</div></div>`).join("")}
       ${pendentes.length ? `<div class="item" id="rev-diarios"><div class="hora">—</div><div class="t"><b class="lima">Revisar ${pendentes.length} diário${pendentes.length > 1 ? "s" : ""}</b></div><div class="dir lima">${pendentes.slice(0, 3).map((p) => esc(up(primeiroNome(p.alunos?.nome)))).join(" ")}</div></div>` : ""}
     </div>
-    <button class="btn" id="avulsa">+ Sessão avulsa</button>`;
+    <button class="btn" id="avulsa">+ Sessão avulsa</button>${blocoReceber}`;
+  ligaReceber(corpo);
   $("#abrir-prox", corpo).onclick = $("#diario-prox", corpo).onclick = () => abrirDiario(prox.id);
   $("#ficha-prox", corpo).onclick = () => fichaAluno(prox.aluno_id);
   $$(".item[data-id]", corpo).forEach((el) => (el.onclick = () => abrirDiario(el.dataset.id)));
@@ -182,9 +196,10 @@ async function renderMes(root) {
     <div class="mono small muted" style="margin:4px 0 6px">${sessoes.length} sessões · ${feitas} realizadas · ${faltas} faltas · ${agendadas} agendadas</div>
     <div class="mcab">${DIAS.map((d) => `<div>${d[0]}</div>`).join("")}</div>
     <div class="mes">${celulas.join("")}</div>
-    <div class="acoes"><button class="btn" id="hoje-mes">Mês atual</button><button class="btn primario" id="avulsa">+ Avulsa</button></div>`;
+    <div class="acoes"><button class="btn" id="gerar-mes">Gerar mês pelos horários fixos</button><button class="btn" id="hoje-mes">Mês atual</button><button class="btn primario" id="avulsa">+ Avulsa</button></div>`;
   $$(".nav-mes", root).forEach((b) => (b.onclick = () => { mesBase = addMeses(mesBase, Number(b.dataset.d)); render("hoje"); }));
   $("#hoje-mes", root).onclick = () => { mesBase = inicioMes(new Date()); render("hoje"); };
+  $("#gerar-mes", root).onclick = (e) => { e.target.disabled = true; gerarPeriodo(mesBase, fim, sessoes, "Mês"); };
   $("#avulsa", root).onclick = () => formSessao();
   $$(".mdia[data-k]", root).forEach((el) => (el.onclick = () => abrirDia(new Date(Number(el.dataset.k)), porDia[el.dataset.k] || [])));
 }
@@ -196,21 +211,122 @@ function abrirDia(data, lst) {
 }
 const itemSessaoDia = (s) => `<div class="item" data-id="${s.id}"><div class="hora">${fmtHora(s.inicio)}</div><div class="t"><b>${esc(s.alunos?.nome)}</b><span>${esc(up(s.modalidades?.nome || ""))}${s.locais?.apelido ? " · " + esc(up(s.locais.apelido)) : ""}</span></div><span class="chip ${s.status}">${STATUS_LABEL[s.status]}</span></div>`;
 
-async function gerarSemana(base, existentes) {
+async function gerarPeriodo(de, ate, existentes, rotulo = "Semana") {
   const { data: hs } = await db.horariosTodos();
   if (!hs?.length) return toast("Nenhum horário fixo cadastrado. Cadastre na ficha do aluno.");
-  const novas = [];
-  for (const h of hs) {
-    const d = addDias(base, h.dia_semana); const [hh, mm] = h.hora_inicio.split(":").map(Number);
-    const ini = new Date(d); ini.setHours(hh, mm, 0, 0);
-    if (inicioDia(ini).getTime() < inicioDia(new Date()).getTime()) continue;
-    if (existentes.some((s) => s.aluno_id === h.aluno_id && Math.abs(new Date(s.inicio) - ini) < 36e5)) continue;
-    const pacote = await db.pacoteAtivo(h.aluno_id);
-    novas.push({ aluno_id: h.aluno_id, modalidade_id: h.modalidade_id, local_id: h.local_id, horario_fixo_id: h.id, pacote_id: pacote?.id ?? null, inicio: ini.toISOString(), fim: new Date(ini.getTime() + h.duracao_min * 60000).toISOString(), status: "agendada" });
+  const novas = [], pacotes = {};
+  for (let d = new Date(de); d < ate; d = addDias(d, 1)) {
+    if (inicioDia(d).getTime() < inicioDia(new Date()).getTime()) continue;
+    for (const h of hs.filter((h) => h.dia_semana === d.getDay())) {
+      const [hh, mm] = h.hora_inicio.split(":").map(Number);
+      const ini = new Date(d); ini.setHours(hh, mm, 0, 0);
+      if (existentes.some((s) => s.aluno_id === h.aluno_id && Math.abs(new Date(s.inicio) - ini) < 36e5)) continue;
+      if (!(h.aluno_id in pacotes)) pacotes[h.aluno_id] = await db.pacoteAtivo(h.aluno_id);
+      novas.push({ aluno_id: h.aluno_id, modalidade_id: h.modalidade_id, local_id: h.local_id, horario_fixo_id: h.id, pacote_id: pacotes[h.aluno_id]?.id ?? null, inicio: ini.toISOString(), fim: new Date(ini.getTime() + h.duracao_min * 60000).toISOString(), status: "agendada" });
+    }
   }
-  if (!novas.length) return toast("Semana já está gerada.");
+  if (!novas.length) return toast(`${rotulo} já está gerado(a).`);
   await ok(sb.from("sessoes").insert(novas), "Erro ao gerar sessões");
   toast(`${novas.length} sessão(ões) criada(s).`); render("hoje");
+}
+const gerarSemana = (base, existentes) => gerarPeriodo(base, addDias(base, 7), existentes, "Semana");
+
+// ---------------------------------------------------------------- 3b. CAIXA
+telas.caixa = async (root) => {
+  const fim = addMeses(caixaBase, 1), hojeStr = new Date().toISOString().slice(0, 10);
+  const [{ data: mov }, { data: rec }] = await Promise.all([db.caixa(caixaBase, fim), db.aReceber()]);
+  const movs = mov || [], receber = rec || [];
+  const soma = (l) => l.reduce((t, r) => t + r.valor_centavos, 0);
+  const entradas = movs.filter((m) => m.tipo === "entrada"), saidas = movs.filter((m) => m.tipo === "saida");
+  const vencidas = receber.filter((r) => r.vencida), aVencer = receber.filter((r) => !r.vencida);
+  const em30 = addDias(new Date(), 30).toISOString().slice(0, 10), prev30 = soma(receber.filter((r) => r.vence_em <= em30));
+  topo(`${MESES_LONGO[caixaBase.getMonth()]} ${caixaBase.getFullYear()}`, "Caixa", `<button class="badge cinza" id="hoje-caixa">mês atual</button>`);
+  $("#hoje-caixa").onclick = () => { caixaBase = inicioMes(new Date()); render("caixa"); };
+  const linhaRec = (r) => `<div class="item abre" data-o="${r.origem}" data-id="${r.id}"><div class="t"><b>${esc(r.aluno_nome)}${r.aluno_informou_em ? ' <span class="chip lima">aluno avisou</span>' : ""}</b><span>${esc(r.descricao)} · ${r.vencida ? "<span class='vermelho'>venceu " + fmtData(r.vence_em) + "</span>" : "vence " + fmtData(r.vence_em)}</span></div><div class="mono">${fmtReais(r.valor_centavos)}</div><span class="chip ${r.vencida ? "alerta" : ""}">${r.vencida ? "vencido" : "a vencer"}</span></div>`;
+  const linhaMov = (m) => `<div class="item ${m.origem === "despesa" ? "desp" : ""}" data-id="${m.id}"><div class="t"><b>${esc(m.origem === "despesa" ? m.descricao : m.quem)}</b><span>${m.origem === "despesa" ? (CATEG_DESPESA[m.quem] || m.quem) : esc(m.descricao)} · ${fmtData(m.data)}${m.detalhe && m.origem !== "despesa" ? " · " + esc(m.detalhe) : ""}</span></div><div class="mono ${m.tipo === "entrada" ? "lima" : ""}">${m.tipo === "entrada" ? "+" : "−"}${fmtReais(m.valor_centavos)}</div>${m.origem === "despesa" ? `<button class="link rm-d" data-id="${m.id}">×</button>` : ""}</div>`;
+  const lista = filtroCaixa === "aberto" ? [...vencidas, ...aVencer].map(linhaRec) : filtroCaixa === "vencido" ? vencidas.map(linhaRec) : filtroCaixa === "entradas" ? entradas.map(linhaMov) : filtroCaixa === "saidas" ? saidas.map(linhaMov) : movs.map(linhaMov);
+  root.innerHTML = `
+    <div class="linha-entre" style="margin-top:12px"><button class="link nav-cx" data-d="-1">‹ mês</button><strong class="mono small" style="text-transform:uppercase">${MESES_LONGO[caixaBase.getMonth()]} ${caixaBase.getFullYear()}</strong><button class="link nav-cx" data-d="1">mês ›</button></div>
+    <div class="caixa-kpi">
+      <div class="destaque"><span>Recebido no mês</span><b>${fmtReais(soma(entradas))}</b></div>
+      <div><span>Despesas</span><b>${fmtReais(soma(saidas))}</b></div>
+      <div><span>Saldo do mês</span><b class="${soma(entradas) - soma(saidas) < 0 ? "vermelho" : ""}">${fmtReais(soma(entradas) - soma(saidas))}</b></div>
+      <div><span>A vencer</span><b>${fmtReais(soma(aVencer))}</b></div>
+      <div><span>Vencido</span><b class="${vencidas.length ? "vermelho" : ""}">${fmtReais(soma(vencidas))}</b></div>
+      <div class="largo"><span>Previsão 30 dias (a receber até ${fmtData(em30)})</span><b class="lima">+${fmtReais(prev30)}</b></div>
+    </div>
+    <div class="seg" style="flex-wrap:wrap">${[["tudo", "Movimentos"], ["entradas", "Entradas"], ["saidas", "Saídas"], ["aberto", `A receber (${receber.length})`], ["vencido", `Vencidos (${vencidas.length})`]].map(([k, v]) => `<button data-f="${k}" class="${filtroCaixa === k ? "on" : ""}">${v}</button>`).join("")}</div>
+    <div class="secao lista">${lista.join("") || `<div class="vazio">${filtroCaixa === "aberto" || filtroCaixa === "vencido" ? "Ninguém devendo." : "Nenhum movimento neste mês."}</div>`}</div>
+    <div class="acoes"><button class="btn primario" id="lanc-entrada">+ Entrada</button><button class="btn" id="lanc-saida">+ Despesa</button><button class="btn" id="gerar-mens">Gerar mensalidades</button></div>`;
+  $$(".nav-cx", root).forEach((b) => (b.onclick = () => { caixaBase = addMeses(caixaBase, Number(b.dataset.d)); render("caixa"); }));
+  $$(".seg button", root).forEach((b) => (b.onclick = () => { filtroCaixa = b.dataset.f; render("caixa"); }));
+  $$(".abre", root).forEach((el) => (el.onclick = () => modalCobranca(el.dataset.o, el.dataset.id, () => render("caixa"))));
+  $$(".rm-d", root).forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); if (!confirm("Apagar esta despesa?")) return; await ok(sb.from("despesas").delete().eq("id", b.dataset.id)); render("caixa"); }));
+  $("#lanc-entrada", root).onclick = () => formEntrada();
+  $("#lanc-saida", root).onclick = () => formDespesa();
+  $("#gerar-mens", root).onclick = async (e) => { e.target.disabled = true; const n = await ok(sb.rpc("gerar_mensalidades")); toast(n ? `${n} cobrança(s) gerada(s).` : "Nada a gerar: períodos já cobertos (ou nenhum aluno recorrente com valor)."); render("caixa"); };
+};
+
+// cobrança aberta: QR Pix, copia e cola, WhatsApp, marcar pago
+async function modalCobranca(origem, id, depois) {
+  const [{ data: pix }, { data: al }] = await Promise.all([sb.rpc("pix_dados", { p_origem: origem, p_id: id }), sb.from("v_a_receber").select("*").eq("id", id).maybeSingle()]);
+  if (!al) return toast("Esta cobrança já foi paga.");
+  const { data: aluno } = await sb.from("alunos").select("nome, telefone").eq("id", al.aluno_id).single();
+  const temPix = pix && !pix.erro, cod = temPix ? PF_PIX.codigo(pix) : "";
+  const msg = `Olá, ${primeiroNome(aluno?.nome || "")}! Segue a cobrança: ${al.descricao} — ${fmtReais(al.valor_centavos)}${al.vencida ? " (venceu " + fmtData(al.vence_em) + ")" : " (vence " + fmtData(al.vence_em) + ")"}.${temPix ? `\n\nPix copia e cola:\n${cod}\n\nChave: ${pix.chave}` : ""}\n\nDepois de pagar, toque em "Já paguei" no app ou me avise aqui. Obrigado!`;
+  const corpo = abrirModal(al.descricao, `
+    <div class="linha-entre"><b class="mono" style="font-size:22px">${fmtReais(al.valor_centavos)}</b><span class="chip ${al.vencida ? "alerta" : ""}">${al.vencida ? "venceu " : "vence "}${fmtData(al.vence_em)}</span></div>
+    ${al.aluno_informou_em ? `<p class="small lima">O aluno avisou que pagou em ${fmtData(al.aluno_informou_em)} ${new Date(al.aluno_informou_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}. Confira no extrato e marque como pago.</p>` : ""}
+    ${temPix ? `<div class="qr-box">${PF_PIX.svg(cod)}</div><div class="copia mono small">${esc(cod)}</div><div class="acoes"><button class="btn" id="cp-pix">Copiar código Pix</button></div>` : `<p class="small vermelho">${esc(pix?.erro || "Pix indisponível")}. Cadastre em Acervo → Ajustes → Recebimentos.</p>`}
+    <div class="acoes">${aluno?.telefone ? `<a class="btn primario" target="_blank" rel="noopener" href="https://wa.me/55${aluno.telefone.replace(/\D/g, "")}?text=${encodeURIComponent(msg)}">Cobrar pelo WhatsApp</a>` : '<span class="small muted">Aluno sem WhatsApp cadastrado.</span>'}</div>
+    <div class="form" style="margin-top:10px"><label>Forma do pagamento<select id="forma"><option>pix</option><option>dinheiro</option><option>cartão</option><option>transferência</option></select></label></div>
+    <div class="acoes"><button class="btn primario" id="pago">Marcar como pago hoje</button><button class="btn" id="ficha">Ficha do aluno</button></div>`, aluno?.nome || "");
+  $("#cp-pix", corpo) && ($("#cp-pix", corpo).onclick = () => copiar(cod, "Código Pix copiado."));
+  $("#ficha", corpo).onclick = () => { fecharModal(); fichaAluno(al.aluno_id, "horarios"); };
+  $("#pago", corpo).onclick = async (e) => { e.target.disabled = true; const hoje = new Date().toISOString().slice(0, 10), forma = $("#forma", corpo).value;
+    await ok(origem === "pacote" ? sb.from("pacotes").update({ pago: true, pago_em: hoje, forma_pagamento: forma }).eq("id", id) : sb.from("cobrancas").update({ pago_em: hoje, forma_pagamento: forma }).eq("id", id));
+    toast("Pagamento registrado."); fecharModal(); depois && depois(); };
+}
+
+async function formEntrada() {
+  const { data: al } = await sb.from("alunos").select("id, nome").eq("status", "ativo").order("nome");
+  const corpo = abrirModal("Nova entrada", `
+    <form class="form" id="fent">
+      <label>Aluno<select name="aluno_id" required>${(al || []).map((a) => `<option value="${a.id}">${esc(a.nome)}</option>`).join("")}</select></label>
+      <label>Descrição<input name="descricao" required placeholder="ex.: Aula extra 12/10, Mensalidade avulsa"></label>
+      <div class="duas"><label>Valor (R$)<input type="number" step="0.01" min="0" name="valor" required></label><label>Vence em<input type="date" name="vence_em" value="${new Date().toISOString().slice(0, 10)}" required></label></div>
+      <label class="check"><input type="checkbox" name="pago"> Já recebi (entra como pago hoje)</label>
+      <button class="btn primario" type="submit">Salvar</button>
+    </form>`);
+  $("#fent", corpo).onsubmit = async (e) => { e.preventDefault(); const d = formDados(e.target);
+    await ok(sb.from("cobrancas").insert({ aluno_id: d.aluno_id, tipo: "outro", descricao: d.descricao, valor_centavos: Math.round(Number(d.valor) * 100), vence_em: d.vence_em, pago_em: d.pago ? new Date().toISOString().slice(0, 10) : null, forma_pagamento: d.pago ? "pix" : null }));
+    toast("Entrada salva."); fecharModal(); render("caixa"); };
+}
+
+function formDespesa() {
+  const corpo = abrirModal("Nova despesa", `
+    <form class="form" id="fdesp">
+      <label>Categoria<select name="categoria">${Object.entries(CATEG_DESPESA).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
+      <label>Descrição<input name="descricao" required placeholder="ex.: Gasolina semana 1, Caneleiras"></label>
+      <div class="duas"><label>Valor (R$)<input type="number" step="0.01" min="0" name="valor" required></label><label>Data<input type="date" name="data" value="${new Date().toISOString().slice(0, 10)}" required></label></div>
+      <button class="btn primario" type="submit">Salvar</button>
+    </form>`);
+  $("#fdesp", corpo).onsubmit = async (e) => { e.preventDefault(); const d = formDados(e.target);
+    await ok(sb.from("despesas").insert({ categoria: d.categoria, descricao: d.descricao, valor_centavos: Math.round(Number(d.valor) * 100), data: d.data }));
+    toast("Despesa salva."); fecharModal(); render("caixa"); };
+}
+
+function formRecebimento(cfgRec) {
+  const corpo = abrirModal("Recebimentos", `
+    <form class="form" id="frec">
+      <label>Chave Pix (CPF, CNPJ, e-mail, celular ou aleatória)<input name="chave_pix" value="${esc(cfgRec.chave_pix)}" required></label>
+      <div class="duas"><label>Nome no Pix (até 25 letras)<input name="nome" maxlength="25" value="${esc(cfgRec.nome)}" required></label><label>Cidade (até 15 letras)<input name="cidade" maxlength="15" value="${esc(cfgRec.cidade || "BELEM")}" required></label></div>
+      <p class="small muted">O QR é gerado no app com esta chave, com o valor e um código da cobrança. Confirmação é manual: o aluno toca "Já paguei" e você marca como pago ao ver o crédito no banco.</p>
+      <button class="btn primario" type="submit">Salvar</button>
+    </form>`);
+  $("#frec", corpo).onsubmit = async (e) => { e.preventDefault(); const d = formDados(e.target);
+    await ok(sb.from("config_recebimento").upsert({ id: true, chave_pix: d.chave_pix.trim(), nome: d.nome.trim(), cidade: d.cidade.trim(), atualizado_em: new Date().toISOString() }));
+    toast("Recebimento salvo."); fecharModal(); render("acervo"); };
 }
 
 // ---------------------------------------------------------------- 4. ALUNOS
@@ -268,10 +384,10 @@ async function gerarAcesso(a) {
 let abaFicha = "programa";
 async function fichaAluno(id, aba = abaFicha) {
   abaFicha = aba;
-  const [{ data: a }, { data: locais }, { data: hs }, { data: pcs }, { data: saude }, { data: ss }, { data: prog }, { data: tecs }, { data: am }] = await Promise.all([db.aluno(id), db.locais(id), db.horarios(id), db.pacotes(id), db.saude(id), db.sessoesAluno(id), db.programa(id), db.alunoTecnicas(id), db.alunoModalidades(id)]);
+  const [{ data: a }, { data: locais }, { data: hs }, { data: pcs }, { data: saude }, { data: ss }, { data: prog }, { data: tecs }, { data: am }, { data: cbs }] = await Promise.all([db.aluno(id), db.locais(id), db.horarios(id), db.pacotes(id), db.saude(id), db.sessoesAluno(id), db.programa(id), db.alunoTecnicas(id), db.alunoModalidades(id), db.cobrancas(id)]);
   if (!a) return;
   a.slugs = (am || []).map((x) => x.modalidades?.slug).filter(Boolean);
-  const ctx = { a, locais: locais || [], hs: hs || [], pcs: pcs || [], saude: saude || [], ss: ss || [], prog: prog || [], tecs: tecs || [] };
+  const ctx = { a, locais: locais || [], hs: hs || [], pcs: pcs || [], saude: saude || [], ss: ss || [], prog: prog || [], tecs: tecs || [], cbs: cbs || [] };
   const feitas = ctx.ss.filter((s) => s.status === "realizada").length;
   topo(`${a.modalidades || "sem modalidade"} · ${lab(a.experiencia)} · ${feitas} realizadas`, a.apelido || primeiroNome(a.nome), `<button class="badge cinza" id="voltar">← alunos</button>`);
   $("#voltar").onclick = () => render("alunos");
@@ -325,16 +441,68 @@ function abaSessoes({ a, ss }, root) {
   $$("[data-s]", root).forEach((el) => (el.onclick = () => abrirDiario(el.dataset.s)));
 }
 
-function abaHorarios({ a, hs, locais, pcs }, root) {
+function abaHorarios({ a, hs, locais, pcs, cbs }, root) {
+  const modelo = a.cobranca_tipo === "sessao" ? `Por sessão · ${fmtReais(a.valor_centavos || 0)} por aula` : a.cobranca_tipo === "mensal" ? `${PERIODO_LABEL[a.periodo_meses || 1]} · ${fmtReais(a.valor_centavos || 0)} · vence dia ${a.dia_vencimento || 5}` : "Por pacote de sessões";
+  const semValor = a.cobranca_tipo !== "pacote" && !a.valor_centavos;
+  const abertas = cbs.filter((c) => c.situacao !== "paga"), pagas = cbs.filter((c) => c.situacao === "paga");
+  const itemCobranca = (c) => `<div class="item ${c.situacao !== "paga" ? "abre-cob" : ""}" data-c="${c.id}"><div class="t"><b>${esc(c.descricao)}${c.aluno_informou_em && c.situacao !== "paga" ? ' <span class="chip lima">aluno avisou</span>' : ""}</b><span>${fmtReais(c.valor_centavos)} · ${c.situacao === "paga" ? "pago em " + fmtData(c.pago_em) : (c.situacao === "vencida" ? "<span class='vermelho'>VENCIDA " + fmtData(c.vence_em) + "</span>" : "vence " + fmtData(c.vence_em))}</span></div>${c.situacao !== "paga" ? `<button class="btn mini pg-c" data-c="${c.id}">pago</button><button class="link rm-c" data-c="${c.id}">×</button>` : ""}</div>`;
   root.innerHTML = `
     <div class="secao"><div class="eyebrow">Horários fixos</div><div class="lista">${hs.map((h) => `<div class="item" data-h="${h.id}"><div class="hora">${h.hora_inicio.slice(0, 5)}</div><div class="t"><b>${DIAS_LONGO[h.dia_semana]}</b><span>${h.duracao_min} min · ${esc(h.locais?.apelido || "local")}${h.locais?.bairro ? " · " + esc(h.locais.bairro) : ""}${h.origem === "aluno" ? " · escolhido pelo aluno" : ""}</span></div><button class="link rm-h">remover</button></div>`).join("") || '<div class="vazio">Nenhum horário fixo.</div>'}</div><button class="btn" id="f-horario">+ Horário fixo</button></div>
     <div class="secao"><div class="eyebrow">Locais</div><div class="lista">${locais.map((l) => `<div class="item"><div class="t"><b>${esc(l.apelido || LOCAL_LABEL[l.tipo])}${l.padrao ? " (padrão)" : ""}</b><span>${esc(l.endereco)}${l.bairro ? " · " + esc(l.bairro) : ""}</span></div></div>`).join("") || '<div class="vazio">Nenhum local.</div>'}</div><button class="btn" id="f-local">+ Local</button></div>
-    <div class="secao"><div class="eyebrow">Pacotes</div><div class="lista">${pcs.map((p) => `<div class="item"><div class="t"><b>${esc(p.nome)} — ${p.sessoes_restantes}/${p.sessoes_total}</b><span>${fmtReais(p.preco_centavos)} · ${p.pago ? "pago" : "<span class='vermelho'>NÃO PAGO</span>"}${p.vence_em ? " · vence " + fmtData(p.vence_em) : ""}${p.vencido ? " · VENCIDO" : ""}</span></div>${!p.pago ? `<button class="btn mini pg" data-p="${p.id}">pago</button>` : ""}</div>`).join("") || '<div class="vazio">Nenhum pacote.</div>'}</div><button class="btn" id="f-pacote">+ Pacote</button></div>`;
+    <div class="secao"><div class="eyebrow">Cobrança</div>
+      <div class="item" id="f-cobranca"><div class="t"><b>${modelo}</b><span>${semValor ? "<span class='vermelho'>DEFINA O VALOR</span>" : a.cobranca_tipo === "sessao" ? "cada aula realizada (ou falta sem aviso) vira um lançamento, com 7 dias para acertar" : a.cobranca_tipo === "mensal" ? "gere as mensalidades do mês na aba Hoje" : "compre pacotes abaixo; cada aula desconta do saldo"}</span></div><button class="link">editar</button></div>
+      ${a.cobranca_tipo !== "pacote" ? `<div class="lista">${abertas.map(itemCobranca).join("") || '<div class="vazio">Nada em aberto.</div>'}</div>${pagas.length ? `<details><summary class="mono small muted" style="padding:8px 0;cursor:pointer">${pagas.length} pago(s)</summary><div class="lista">${pagas.map(itemCobranca).join("")}</div></details>` : ""}<button class="btn" id="f-lanc">+ Lançamento avulso</button>` : ""}
+    </div>
+    ${a.cobranca_tipo === "pacote" || pcs.length ? `<div class="secao"><div class="eyebrow">Pacotes</div><div class="lista">${pcs.map((p) => `<div class="item"><div class="t"><b>${esc(p.nome)} — ${p.sessoes_restantes}/${p.sessoes_total}</b><span>${fmtReais(p.preco_centavos)} · ${p.pago ? "pago" : "<span class='vermelho'>NÃO PAGO</span>"}${p.vence_em ? " · vence " + fmtData(p.vence_em) : ""}${p.vencido ? " · VENCIDO" : ""}</span></div>${!p.pago ? `<button class="btn mini pg" data-p="${p.id}">pago</button>` : ""}${p.sessoes_consumidas === 0 ? `<button class="link rm-p" data-p="${p.id}" title="remover pacote sem uso">×</button>` : ""}</div>`).join("") || '<div class="vazio">Nenhum pacote.</div>'}</div><button class="btn" id="f-pacote">+ Pacote</button></div>` : ""}`;
   $("#f-horario", root).onclick = () => formHorario(a, locais);
   $("#f-local", root).onclick = () => formLocal(a);
-  $("#f-pacote", root).onclick = () => formPacote(a);
+  $("#f-pacote", root) && ($("#f-pacote", root).onclick = () => formPacote(a));
+  $("#f-cobranca", root).onclick = () => formCobranca(a);
+  $("#f-lanc", root) && ($("#f-lanc", root).onclick = () => formLancamento(a));
   $$(".rm-h", root).forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await ok(sb.from("horarios_fixos").update({ ativo: false }).eq("id", b.closest("[data-h]").dataset.h)); fichaAluno(a.id, "horarios"); }));
-  $$(".pg", root).forEach((b) => (b.onclick = async () => { await ok(sb.from("pacotes").update({ pago: true, pago_em: new Date().toISOString().slice(0, 10) }).eq("id", b.dataset.p)); toast("Pagamento registrado."); fichaAluno(a.id, "horarios"); }));
+  $$(".pg", root).forEach((b) => (b.onclick = async () => { b.disabled = true; await ok(sb.from("pacotes").update({ pago: true, pago_em: new Date().toISOString().slice(0, 10) }).eq("id", b.dataset.p)); toast("Pagamento registrado."); fichaAluno(a.id, "horarios"); }));
+  $$(".rm-p", root).forEach((b) => (b.onclick = async () => { if (!confirm("Remover este pacote? (nenhuma aula foi descontada dele)")) return; b.disabled = true; await ok(sb.from("pacotes").delete().eq("id", b.dataset.p)); toast("Pacote removido."); fichaAluno(a.id, "horarios"); }));
+  $$(".abre-cob", root).forEach((el) => (el.onclick = (e) => { if (e.target.closest("button")) return; modalCobranca("cobranca", el.dataset.c, () => fichaAluno(a.id, "horarios")); }));
+  $$(".pg-c", root).forEach((b) => (b.onclick = async () => { b.disabled = true; await ok(sb.from("cobrancas").update({ pago_em: new Date().toISOString().slice(0, 10) }).eq("id", b.dataset.c)); toast("Pagamento registrado."); fichaAluno(a.id, "horarios"); }));
+  $$(".rm-c", root).forEach((b) => (b.onclick = async () => { if (!confirm("Apagar este lançamento?")) return; b.disabled = true; await ok(sb.from("cobrancas").delete().eq("id", b.dataset.c)); fichaAluno(a.id, "horarios"); }));
+}
+
+function modalReceber(lista) {
+  const corpo = abrirModal("A receber", `<div class="lista">${lista.map((r) => `<div class="item"><div class="t"><b>${esc(r.aluno_nome)}</b><span>${esc(r.descricao)} · ${fmtReais(r.valor_centavos)} · ${r.vencida ? "<span class='vermelho'>venceu " + fmtData(r.vence_em) + "</span>" : "vence " + fmtData(r.vence_em)}</span></div><button class="btn mini pg-r" data-o="${r.origem}" data-id="${r.id}">pago</button><button class="link ab-r" data-a="${r.aluno_id}">ficha</button></div>`).join("") || '<div class="vazio">Ninguém devendo.</div>'}</div>`);
+  $$(".pg-r", corpo).forEach((b) => (b.onclick = async () => { b.disabled = true; const hoje = new Date().toISOString().slice(0, 10); await ok(b.dataset.o === "pacote" ? sb.from("pacotes").update({ pago: true, pago_em: hoje }).eq("id", b.dataset.id) : sb.from("cobrancas").update({ pago_em: hoje }).eq("id", b.dataset.id)); toast("Pagamento registrado."); fecharModal(); render("hoje"); }));
+  $$(".ab-r", corpo).forEach((b) => (b.onclick = () => { fecharModal(); fichaAluno(b.dataset.a, "horarios"); }));
+}
+
+async function formCobranca(a) {
+  const corpo = abrirModal("Como este aluno paga", `
+    <form class="form" id="fcob">
+      <label>Modelo<select name="cobranca_tipo">${[["sessao", "Por sessão (valor por aula)"], ["mensal", "Mensal (valor fixo por mês)"], ["pacote", "Pacote de sessões"]].map(([k, v]) => `<option value="${k}" ${a.cobranca_tipo === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <div class="duas"><label>Valor (R$)<input type="number" step="0.01" min="0" name="valor" value="${a.valor_centavos ? (a.valor_centavos / 100).toFixed(2) : ""}"></label><label>Dia do vencimento<input type="number" name="dia_vencimento" min="1" max="28" value="${a.dia_vencimento || 5}"></label></div>
+      <label>Período (recorrente)<select name="periodo_meses">${[[1, "Mensal"], [3, "Trimestral"], [6, "Semestral"], [12, "Anual"]].map(([k, v]) => `<option value="${k}" ${(a.periodo_meses || 1) === k ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <p class="small muted">Por sessão: cada aula realizada ou falta sem aviso gera um lançamento (7 dias para acertar). Recorrente: um lançamento por período (valor é o do período inteiro), gerado em Hoje → Gerar mensalidades. Pacote: compra de N sessões, como antes.</p>
+      <button class="btn primario" type="submit">Salvar</button>
+    </form>`, a.nome);
+  const f = $("#fcob", corpo);
+  const ajusta = () => { f.valor.required = f.cobranca_tipo.value !== "pacote"; f.dia_vencimento.disabled = f.cobranca_tipo.value !== "mensal"; f.periodo_meses.disabled = f.cobranca_tipo.value !== "mensal"; }; f.cobranca_tipo.onchange = ajusta; ajusta();
+  f.onsubmit = async (e) => {
+    e.preventDefault(); const d = formDados(f);
+    await ok(sb.from("alunos").update({ cobranca_tipo: d.cobranca_tipo, valor_centavos: d.valor ? Math.round(Number(d.valor) * 100) : null, dia_vencimento: d.cobranca_tipo === "mensal" ? Number(d.dia_vencimento) || 5 : null, periodo_meses: d.cobranca_tipo === "mensal" ? Number(d.periodo_meses) || 1 : 1 }).eq("id", a.id));
+    toast("Cobrança salva."); fecharModal(); fichaAluno(a.id, "horarios");
+  };
+}
+
+async function formLancamento(a) {
+  const corpo = abrirModal("Lançamento avulso", `
+    <form class="form" id="flan">
+      <label>Descrição<input name="descricao" required placeholder="ex.: Aula extra 12/10, Luva emprestada"></label>
+      <div class="duas"><label>Valor (R$)<input type="number" step="0.01" min="0" name="valor" required></label><label>Vence em<input type="date" name="vence_em" value="${new Date().toISOString().slice(0, 10)}" required></label></div>
+      <button class="btn primario" type="submit">Salvar</button>
+    </form>`, a.nome);
+  $("#flan", corpo).onsubmit = async (e) => {
+    e.preventDefault(); const d = formDados(e.target);
+    await ok(sb.from("cobrancas").insert({ aluno_id: a.id, tipo: "outro", descricao: d.descricao, valor_centavos: Math.round(Number(d.valor) * 100), vence_em: d.vence_em }));
+    toast("Lançamento salvo."); fecharModal(); fichaAluno(a.id, "horarios");
+  };
 }
 
 function abaEvolucao({ a, ss, prog, tecs }, root) {
@@ -491,12 +659,14 @@ telas.acervo = async (root) => {
     ac.innerHTML = `<div class="secao"><div class="eyebrow">Planos e preços</div><div class="lista">${pl?.length ? pl.map((p) => `<div class="item"><div class="t"><b>${esc(p.nome)}</b><span>${p.sessoes} sessão(ões) · ${fmtReais(p.preco_centavos)}${p.validade_dias ? " · " + p.validade_dias + " dias" : ""}${p.inclui_deslocamento ? "" : " · deslocamento à parte"}</span></div></div>`).join("") : '<div class="vazio">Nenhum plano. Ex.: "Avulsa 1h", "Pacote 8", "Mensal 2x/semana".</div>'}</div><button class="btn" id="novo-plano">+ Plano</button></div>`;
     $("#novo-plano", ac).onclick = formPlano;
   } else {
-    const { data: cv } = await db.convites();
+    const [{ data: cv }, cfgRec] = await Promise.all([db.convites(), db.recebimento()]);
     ac.innerHTML = `
+      <div class="secao"><div class="eyebrow">Recebimentos</div><div class="item" id="rec"><div class="t"><b>${cfgRec.chave_pix ? "Pix · " + esc(cfgRec.chave_pix) : "<span class='vermelho'>Chave Pix não cadastrada</span>"}</b><span>${cfgRec.chave_pix ? esc(cfgRec.nome) + " · " + esc(cfgRec.cidade) : "sem ela o app não gera QR de cobrança"}</span></div><button class="link">editar</button></div></div>
       <div class="secao"><div class="eyebrow">Política de cancelamento</div><div class="form"><label>Antecedência mínima (horas) para cancelar sem perder a sessão</label><div class="duas"><input type="number" id="cfg-ant" min="0" max="72" value="${cfg.antecedencia}"><button class="btn" id="salvar-cfg" style="margin:0">Salvar</button></div></div></div>
       <div class="secao"><div class="eyebrow">Convites de entrevista em aberto</div><div class="lista">${cv?.length ? cv.map((c) => `<div class="item" data-tk="${c.token}"><div class="t"><b>${esc(c.rotulo || "sem nome")}</b><span>criado ${fmtData(c.criado_em)} · expira ${fmtData(c.expira_em)}</span></div><button class="btn mini cp" data-tk="${c.token}">copiar link</button></div>`).join("") : '<div class="vazio">Nenhum. Crie em Alunos → + Convite.</div>'}</div></div>
       <div class="secao"><div class="eyebrow">Sobre</div><p class="small muted">Versão ${PF_CONFIG.VERSAO} · Supabase: ${PF_CONFIG.SUPABASE_URL.includes("SEU-PROJETO") ? "não configurado (edite config.js)" : "conectado"}<br>Restrições de saúde e observações privadas nunca saem do papel professor. Consentimentos versionados por tipo.</p><div class="acoes"><button class="btn" id="trocar-senha">Trocar minha senha</button><button class="btn" id="sair">Sair</button></div></div>`;
     $("#trocar-senha", ac).onclick = trocarSenha;
+    $("#rec", ac).onclick = () => formRecebimento(cfgRec);
     $("#salvar-cfg", ac).onclick = () => { cfg.antecedencia = Number($("#cfg-ant", ac).value); toast("Política salva."); };
     $$(".cp", ac).forEach((b) => (b.onclick = () => copiar(linkEntrevista(b.dataset.tk), "Link copiado.")));
     $("#sair", ac).onclick = async () => { await sb.auth.signOut(); location.reload(); };
