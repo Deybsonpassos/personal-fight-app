@@ -1,5 +1,5 @@
 // Service worker mínimo: cache do "casco" do app para abrir rápido; dados sempre vêm da rede.
-const CACHE = "pf-v0.6.0";
+const CACHE = "pf-v0.7.0";
 const CASCO = ["./", "./index.html", "./style.css", "./app.js", "./config.js", "./manifest.webmanifest", "./entrevista.html", "./aluno.html", "./aluno.js", "./aluno.webmanifest", "./qrcode.js", "./pix.js"];
 const ESCOPO = new URL(self.registration.scope).pathname;
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CASCO).catch(() => {})).then(() => self.skipWaiting())); });

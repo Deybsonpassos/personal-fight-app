@@ -182,3 +182,6 @@ main { padding: 4px 16px 100px; max-width: 720px; width: 100%; margin: 0 auto; }
 .plano-card .n { font-size: 20px; font-weight: 700; letter-spacing: -.02em; } .plano-card .d { font-family: var(--mono); font-size: 10px; color: var(--muted2); text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; }
 .barra { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; display: flex; margin: 10px 0 6px; } .barra i { display: block; height: 100%; }
 .legenda { display: flex; gap: 12px; flex-wrap: wrap; font-family: var(--mono); font-size: 10px; color: var(--muted2); text-transform: uppercase; letter-spacing: .06em; } .legenda i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+/* ---- Sprint 7: agenda simples ---- */
+.check.grande { font-size: 15px; padding: 10px 0; }
+.semana .dn { cursor: pointer; } .semana .dn:active { color: var(--accent); }

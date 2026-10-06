@@ -109,6 +109,7 @@ const idadeDe = (nasc) => { const n = new Date(nasc), h = new Date(); let i = h.
 const linhaSessao = (s, i) => `${s.numero ? "S" + String(s.numero).padStart(3, "0") + " · " : ""}${up(s.modalidades?.nome || "")}${s.locais?.apelido ? " · " + up(s.locais.apelido) : ""}${s.locais?.bairro ? " · " + up(s.locais.bairro) : ""}`;
 
 telas.hoje = async (root) => {
+  await preencherRecorrencias();
   const hoje = inicioDia(new Date());
   const [{ data: ss }, { data: pend }, { data: recb }] = await Promise.all([db.sessoes(hoje, addDias(hoje, 1)), db.pendencias(), db.aReceber()]);
   const sessoes = ss || [], pendentes = (pend || []).filter((p) => inicioDia(new Date(p.inicio)).getTime() !== hoje.getTime());
@@ -125,7 +126,7 @@ telas.hoje = async (root) => {
 
   const corpo = $("#hoje-corpo", root);
   const prox = sessoes.find((s) => s.status === "agendada") || sessoes[0];
-  if (!prox) { corpo.innerHTML = `<div class="bloco"><div class="pad vazio">Nenhuma sessão hoje. Veja a semana ou marque uma avulsa.</div></div><button class="btn" id="avulsa">+ Sessão avulsa</button>${blocoReceber}`; $("#avulsa", corpo).onclick = () => formSessao(); ligaReceber(corpo); return; }
+  if (!prox) { corpo.innerHTML = `<div class="bloco"><div class="pad vazio">Nenhuma sessão hoje. Veja a semana ou marque uma avulsa.</div></div><button class="btn primario" id="avulsa">+ Nova aula</button>${blocoReceber}`; $("#avulsa", corpo).onclick = () => formAula(); ligaReceber(corpo); return; }
 
   // destaque: dados do aluno da próxima sessão
   const [{ data: hist }, { data: prog }, { data: tecs }] = await Promise.all([db.sessoesAluno(prox.aluno_id, 60), db.programa(prox.aluno_id), db.alunoTecnicas(prox.aluno_id)]);
@@ -156,7 +157,7 @@ telas.hoje = async (root) => {
       ${outras.map((s) => `<div class="item" data-id="${s.id}"><div class="hora">${fmtHora(s.inicio)}</div><div class="t"><b>${esc(s.alunos?.nome)}${s.alunos?.nascimento && idadeDe(s.alunos.nascimento) < 18 ? ' <span class="muted small">kids</span>' : ""}</b></div><div class="dir">${esc(up(s.modalidades?.nome || ""))}${s.locais?.apelido ? " · " + esc(up(s.locais.apelido)) : ""}${s.status !== "agendada" ? "<br>" + up(STATUS_LABEL[s.status]) : ""}</div></div>`).join("")}
       ${pendentes.length ? `<div class="item" id="rev-diarios"><div class="hora">—</div><div class="t"><b class="lima">Revisar ${pendentes.length} diário${pendentes.length > 1 ? "s" : ""}</b></div><div class="dir lima">${pendentes.slice(0, 3).map((p) => esc(up(primeiroNome(p.alunos?.nome)))).join(" ")}</div></div>` : ""}
     </div>
-    <button class="btn" id="avulsa">+ Sessão avulsa</button>${blocoReceber}`;
+    <button class="btn primario" id="avulsa">+ Nova aula</button>${blocoReceber}`;
   ligaReceber(corpo);
   $("#abrir-prox", corpo).onclick = $("#diario-prox", corpo).onclick = () => abrirDiario(prox.id);
   $("#ficha-prox", corpo).onclick = () => fichaAluno(prox.aluno_id);
@@ -170,12 +171,13 @@ async function renderSemana(root) {
   const { data: ss } = await db.sessoes(semanaBase, fim);
   const hoje = inicioDia(new Date()).getTime();
   root.innerHTML = `<div class="linha-entre" style="margin-top:12px"><button class="link nav-sem" data-d="-7">‹ semana</button><strong class="mono small">${fmtData(semanaBase)} – ${fmtData(addDias(semanaBase, 6))}</strong><button class="link nav-sem" data-d="7">semana ›</button></div>
-    <div class="semana">${Array.from({ length: 7 }, (_, i) => { const d = addDias(semanaBase, i); const doDia = (ss || []).filter((s) => inicioDia(new Date(s.inicio)).getTime() === d.getTime()); return `<div class="dia ${d.getTime() === hoje ? "hoje" : ""}"><div class="dn">${DIAS[i]}<br>${d.getDate()}</div>${doDia.map((s) => `<div class="s ${s.status}" data-id="${s.id}" title="${esc(s.alunos?.nome)}">${fmtHora(s.inicio)}<br>${esc(primeiroNome(s.alunos?.nome).slice(0, 6))}</div>`).join("")}</div>`; }).join("")}</div>
-    <div class="acoes"><button class="btn" id="gerar">Gerar semana pelos horários fixos</button><button class="btn primario" id="avulsa">+ Avulsa</button></div>`;
+    <div class="semana">${Array.from({ length: 7 }, (_, i) => { const d = addDias(semanaBase, i); const doDia = (ss || []).filter((s) => inicioDia(new Date(s.inicio)).getTime() === d.getTime()); return `<div class="dia ${d.getTime() === hoje ? "hoje" : ""}"><div class="dn" data-d="${d.getTime()}" title="nova aula neste dia">${DIAS[i]}<br>${d.getDate()}</div>${doDia.map((s) => `<div class="s ${s.status}" data-id="${s.id}" title="${esc(s.alunos?.nome)}">${fmtHora(s.inicio)}<br>${esc(primeiroNome(s.alunos?.nome).slice(0, 6))}</div>`).join("")}</div>`; }).join("")}</div>
+    <p class="small muted" style="margin:6px 0 0">Toque no dia para marcar; toque na aula para abrir.</p>
+    <div class="acoes"><button class="btn primario" id="avulsa">+ Nova aula</button></div>`;
   $$(".nav-sem", root).forEach((b) => (b.onclick = () => { semanaBase = addDias(semanaBase, Number(b.dataset.d)); render("hoje"); }));
   $$(".s", root).forEach((el) => (el.onclick = () => abrirDiario(el.dataset.id)));
-  $("#gerar", root).onclick = () => gerarSemana(semanaBase, ss || []);
-  $("#avulsa", root).onclick = () => formSessao();
+  $$(".dn[data-d]", root).forEach((el) => (el.onclick = () => { const d = new Date(Number(el.dataset.d)); d.setHours(8, 0, 0, 0); formAula({ inicio: d }); }));
+  $("#avulsa", root).onclick = () => formAula();
 }
 
 // calendário mensal: visão geral; toque no dia abre as sessões daquele dia
@@ -196,40 +198,21 @@ async function renderMes(root) {
     <div class="mono small muted" style="margin:4px 0 6px">${sessoes.length} sessões · ${feitas} realizadas · ${faltas} faltas · ${agendadas} agendadas</div>
     <div class="mcab">${DIAS.map((d) => `<div>${d[0]}</div>`).join("")}</div>
     <div class="mes">${celulas.join("")}</div>
-    <div class="acoes"><button class="btn" id="gerar-mes">Gerar mês pelos horários fixos</button><button class="btn" id="hoje-mes">Mês atual</button><button class="btn primario" id="avulsa">+ Avulsa</button></div>`;
+    <div class="acoes"><button class="btn" id="hoje-mes">Mês atual</button><button class="btn primario" id="avulsa">+ Nova aula</button></div>`;
   $$(".nav-mes", root).forEach((b) => (b.onclick = () => { mesBase = addMeses(mesBase, Number(b.dataset.d)); render("hoje"); }));
   $("#hoje-mes", root).onclick = () => { mesBase = inicioMes(new Date()); render("hoje"); };
-  $("#gerar-mes", root).onclick = (e) => { e.target.disabled = true; gerarPeriodo(mesBase, fim, sessoes, "Mês"); };
   $("#avulsa", root).onclick = () => formSessao();
   $$(".mdia[data-k]", root).forEach((el) => (el.onclick = () => abrirDia(new Date(Number(el.dataset.k)), porDia[el.dataset.k] || [])));
 }
 
 function abrirDia(data, lst) {
-  const corpo = abrirModal(fmtCurta(data), `<div class="lista">${lst.length ? lst.map(itemSessaoDia).join("") : '<div class="vazio">Nenhuma sessão neste dia.</div>'}</div><button class="btn primario" id="nova-dia">+ Sessão neste dia</button>`, `${lst.length} ${lst.length === 1 ? "sessão" : "sessões"}`);
+  const corpo = abrirModal(fmtCurta(data), `<div class="lista">${lst.length ? lst.map(itemSessaoDia).join("") : '<div class="vazio">Nenhuma sessão neste dia.</div>'}</div><button class="btn primario" id="nova-dia">+ Nova aula neste dia</button>`, `${lst.length} ${lst.length === 1 ? "sessão" : "sessões"}`);
   $$(".item", corpo).forEach((el) => (el.onclick = () => abrirDiario(el.dataset.id)));
-  $("#nova-dia", corpo).onclick = () => { const d = new Date(data); d.setHours(8, 0, 0, 0); formSessao({ inicio: d }); };
+  $("#nova-dia", corpo).onclick = () => { const d = new Date(data); d.setHours(8, 0, 0, 0); formAula({ inicio: d }); };
 }
 const itemSessaoDia = (s) => `<div class="item" data-id="${s.id}"><div class="hora">${fmtHora(s.inicio)}</div><div class="t"><b>${esc(s.alunos?.nome)}</b><span>${esc(up(s.modalidades?.nome || ""))}${s.locais?.apelido ? " · " + esc(up(s.locais.apelido)) : ""}</span></div><span class="chip ${s.status}">${STATUS_LABEL[s.status]}</span></div>`;
 
-async function gerarPeriodo(de, ate, existentes, rotulo = "Semana") {
-  const { data: hs } = await db.horariosTodos();
-  if (!hs?.length) return toast("Nenhum horário fixo cadastrado. Cadastre na ficha do aluno.");
-  const novas = [], pacotes = {};
-  for (let d = new Date(de); d < ate; d = addDias(d, 1)) {
-    if (inicioDia(d).getTime() < inicioDia(new Date()).getTime()) continue;
-    for (const h of hs.filter((h) => h.dia_semana === d.getDay())) {
-      const [hh, mm] = h.hora_inicio.split(":").map(Number);
-      const ini = new Date(d); ini.setHours(hh, mm, 0, 0);
-      if (existentes.some((s) => s.aluno_id === h.aluno_id && Math.abs(new Date(s.inicio) - ini) < 36e5)) continue;
-      if (!(h.aluno_id in pacotes)) pacotes[h.aluno_id] = await db.pacoteAtivo(h.aluno_id);
-      novas.push({ aluno_id: h.aluno_id, modalidade_id: h.modalidade_id, local_id: h.local_id, horario_fixo_id: h.id, pacote_id: pacotes[h.aluno_id]?.id ?? null, inicio: ini.toISOString(), fim: new Date(ini.getTime() + h.duracao_min * 60000).toISOString(), status: "agendada" });
-    }
-  }
-  if (!novas.length) return toast(`${rotulo} já está gerado(a).`);
-  await ok(sb.from("sessoes").insert(novas), "Erro ao gerar sessões");
-  toast(`${novas.length} sessão(ões) criada(s).`); render("hoje");
-}
-const gerarSemana = (base, existentes) => gerarPeriodo(base, addDias(base, 7), existentes, "Semana");
+
 
 // ---------------------------------------------------------------- 3b. CAIXA
 telas.caixa = async (root) => {
@@ -447,19 +430,19 @@ function abaHorarios({ a, hs, locais, pcs, cbs }, root) {
   const abertas = cbs.filter((c) => c.situacao !== "paga"), pagas = cbs.filter((c) => c.situacao === "paga");
   const itemCobranca = (c) => `<div class="item ${c.situacao !== "paga" ? "abre-cob" : ""}" data-c="${c.id}"><div class="t"><b>${esc(c.descricao)}${c.aluno_informou_em && c.situacao !== "paga" ? ' <span class="chip lima">aluno avisou</span>' : ""}</b><span>${fmtReais(c.valor_centavos)} · ${c.situacao === "paga" ? "pago em " + fmtData(c.pago_em) : (c.situacao === "vencida" ? "<span class='vermelho'>VENCIDA " + fmtData(c.vence_em) + "</span>" : "vence " + fmtData(c.vence_em))}</span></div>${c.situacao !== "paga" ? `<button class="btn mini pg-c" data-c="${c.id}">pago</button><button class="link rm-c" data-c="${c.id}">×</button>` : ""}</div>`;
   root.innerHTML = `
-    <div class="secao"><div class="eyebrow">Horários fixos</div><div class="lista">${hs.map((h) => `<div class="item" data-h="${h.id}"><div class="hora">${h.hora_inicio.slice(0, 5)}</div><div class="t"><b>${DIAS_LONGO[h.dia_semana]}</b><span>${h.duracao_min} min · ${esc(h.locais?.apelido || "local")}${h.locais?.bairro ? " · " + esc(h.locais.bairro) : ""}${h.origem === "aluno" ? " · escolhido pelo aluno" : ""}</span></div><button class="link rm-h">remover</button></div>`).join("") || '<div class="vazio">Nenhum horário fixo.</div>'}</div><button class="btn" id="f-horario">+ Horário fixo</button></div>
+    <div class="secao"><div class="eyebrow">Horários fixos</div><div class="lista">${hs.map((h) => `<div class="item" data-h="${h.id}"><div class="hora">${h.hora_inicio.slice(0, 5)}</div><div class="t"><b>${DIAS_LONGO[h.dia_semana]}</b><span>${h.duracao_min} min · ${esc(h.locais?.apelido || "local")}${h.locais?.bairro ? " · " + esc(h.locais.bairro) : ""}${h.origem === "aluno" ? " · escolhido pelo aluno" : ""}</span></div><button class="link rm-h">remover</button></div>`).join("") || '<div class="vazio">Nenhum horário fixo.</div>'}</div><button class="btn" id="f-horario">+ Horário toda semana</button></div>
     <div class="secao"><div class="eyebrow">Locais</div><div class="lista">${locais.map((l) => `<div class="item"><div class="t"><b>${esc(l.apelido || LOCAL_LABEL[l.tipo])}${l.padrao ? " (padrão)" : ""}</b><span>${esc(l.endereco)}${l.bairro ? " · " + esc(l.bairro) : ""}</span></div></div>`).join("") || '<div class="vazio">Nenhum local.</div>'}</div><button class="btn" id="f-local">+ Local</button></div>
     <div class="secao"><div class="eyebrow">Cobrança</div>
       <div class="item" id="f-cobranca"><div class="t"><b>${modelo}</b><span>${semValor ? "<span class='vermelho'>DEFINA O VALOR</span>" : a.cobranca_tipo === "sessao" ? "cada aula realizada (ou falta sem aviso) vira um lançamento, com 7 dias para acertar" : a.cobranca_tipo === "mensal" ? "gere as mensalidades do mês na aba Hoje" : "compre pacotes abaixo; cada aula desconta do saldo"}</span></div><button class="link">editar</button></div>
       ${a.cobranca_tipo !== "pacote" ? `<div class="lista">${abertas.map(itemCobranca).join("") || '<div class="vazio">Nada em aberto.</div>'}</div>${pagas.length ? `<details><summary class="mono small muted" style="padding:8px 0;cursor:pointer">${pagas.length} pago(s)</summary><div class="lista">${pagas.map(itemCobranca).join("")}</div></details>` : ""}<button class="btn" id="f-lanc">+ Lançamento avulso</button>` : ""}
     </div>
     ${a.cobranca_tipo === "pacote" || pcs.length ? `<div class="secao"><div class="eyebrow">Pacotes</div><div class="lista">${pcs.map((p) => `<div class="item"><div class="t"><b>${esc(p.nome)} — ${p.sessoes_restantes}/${p.sessoes_total}</b><span>${fmtReais(p.preco_centavos)} · ${p.pago ? "pago" : "<span class='vermelho'>NÃO PAGO</span>"}${p.vence_em ? " · vence " + fmtData(p.vence_em) : ""}${p.vencido ? " · VENCIDO" : ""}</span></div>${!p.pago ? `<button class="btn mini pg" data-p="${p.id}">pago</button>` : ""}${p.sessoes_consumidas === 0 ? `<button class="link rm-p" data-p="${p.id}" title="remover pacote sem uso">×</button>` : ""}</div>`).join("") || '<div class="vazio">Nenhum pacote.</div>'}</div><button class="btn" id="f-pacote">+ Pacote</button></div>` : ""}`;
-  $("#f-horario", root).onclick = () => formHorario(a, locais);
+  $("#f-horario", root).onclick = () => formAula({ aluno_id: a.id, repetir: true });
   $("#f-local", root).onclick = () => formLocal(a);
   $("#f-pacote", root) && ($("#f-pacote", root).onclick = () => formPacote(a));
   $("#f-cobranca", root).onclick = () => formCobranca(a);
   $("#f-lanc", root) && ($("#f-lanc", root).onclick = () => formLancamento(a));
-  $$(".rm-h", root).forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); await ok(sb.from("horarios_fixos").update({ ativo: false }).eq("id", b.closest("[data-h]").dataset.h)); fichaAluno(a.id, "horarios"); }));
+  $$(".rm-h", root).forEach((b) => (b.onclick = async (e) => { e.stopPropagation(); const h = hs.find((x) => x.id === b.closest("[data-h]").dataset.h); if (!confirm(`Encerrar ${DIAS_LONGO[h.dia_semana]} ${h.hora_inicio.slice(0, 5)}? As aulas futuras ainda não realizadas desse horário serão apagadas.`)) return; b.disabled = true; const n = await removerHorario(h); toast(n ? `Horário encerrado; ${n} aula(s) futura(s) apagada(s).` : "Horário encerrado."); fichaAluno(a.id, "horarios"); }));
   $$(".pg", root).forEach((b) => (b.onclick = async () => { b.disabled = true; await ok(sb.from("pacotes").update({ pago: true, pago_em: new Date().toISOString().slice(0, 10) }).eq("id", b.dataset.p)); toast("Pagamento registrado."); fichaAluno(a.id, "horarios"); }));
   $$(".rm-p", root).forEach((b) => (b.onclick = async () => { if (!confirm("Remover este pacote? (nenhuma aula foi descontada dele)")) return; b.disabled = true; await ok(sb.from("pacotes").delete().eq("id", b.dataset.p)); toast("Pacote removido."); fichaAluno(a.id, "horarios"); }));
   $$(".abre-cob", root).forEach((el) => (el.onclick = (e) => { if (e.target.closest("button")) return; modalCobranca("cobranca", el.dataset.c, () => fichaAluno(a.id, "horarios")); }));
@@ -606,9 +589,10 @@ async function abrirDiario(id) {
       <div class="acoes"><button class="btn primario" data-st="realizada" type="button">Realizada</button><button class="btn perigo" data-st="falta_sem_aviso" type="button">Falta</button></div>
       <div class="acoes"><button class="btn" data-st="cancelada_aluno" type="button">Cancelou${dentroPrazo ? "" : " (fora do prazo)"}</button><button class="btn" data-st="cancelada_professor" type="button">Cancelei eu</button></div>
       <p class="small muted">Política: cancelamento com menos de ${cfg.antecedencia} h consome a sessão. ${horasAte > 0 ? `Faltam ${horasAte.toFixed(1)} h.` : "Sessão já passou."} Salvar como Realizada marca o diário como revisado.</p>
-      <div class="linha-entre"><button class="link" id="s-salvar" type="button">salvar sem mudar status</button><button class="link" id="s-excluir" type="button" style="color:var(--red)">excluir sessão</button></div>
+      <div class="linha-entre"><button class="link" id="s-salvar" type="button">salvar sem mudar status</button>${s.status === "agendada" ? '<button class="link" id="s-remarcar" type="button">remarcar</button>' : ""}<button class="link" id="s-excluir" type="button" style="color:var(--red)">excluir sessão</button></div>
     </form>`, `${fmtCurta(s.inicio)} · ${fmtHora(s.inicio)}–${fmtHora(s.fim)}`);
   const f = $("#fd", corpo);
+  $("#s-remarcar", corpo) && ($("#s-remarcar", corpo).onclick = () => remarcarSessao(s));
   if (f.programa_ordem) f.programa_ordem.onchange = () => { const x = programa.find((p) => String(p.ordem) === f.programa_ordem.value); if (!x) return; $("#resumo", corpo).value = `${x.tecnicas.join(" · ")}${x.fisico ? " · Físico: " + x.fisico : ""}`; $("#tecs", corpo).innerHTML = blocoTec(x.tecnicas); };
   const salvar = async (st) => {
     const fd = new FormData(f); const d = Object.fromEntries(fd.entries());
@@ -733,21 +717,6 @@ function formLocal(a) {
   };
 }
 
-async function formHorario(a, locais) {
-  const { data: mods } = await db.modalidades();
-  const corpo = abrirModal("Horário fixo", `
-    <form class="form" id="fh">
-      <div class="duas"><label>Dia<select name="dia_semana">${DIAS_LONGO.map((d, i) => `<option value="${i}" ${i === 1 ? "selected" : ""}>${d}</option>`).join("")}</select></label><label>Hora<input type="time" name="hora_inicio" required value="18:00"></label></div>
-      <div class="duas"><label>Duração (min)<input type="number" name="duracao_min" value="60" min="30" step="15"></label><label>Modalidade<select name="modalidade_id">${(mods || []).map((m) => `<option value="${m.id}">${esc(m.nome)}</option>`).join("")}</select></label></div>
-      <label>Local<select name="local_id">${locais.map((l) => `<option value="${l.id}" ${l.padrao ? "selected" : ""}>${esc(l.apelido || LOCAL_LABEL[l.tipo])} — ${esc(l.bairro || l.endereco)}</option>`).join("") || '<option value="">(cadastre um local primeiro)</option>'}</select></label>
-      <button class="btn primario" type="submit">Salvar</button>
-    </form>`, a.nome);
-  $("#fh", corpo).onsubmit = async (e) => {
-    e.preventDefault(); const d = formDados(e.target);
-    await ok(sb.from("horarios_fixos").insert({ aluno_id: a.id, dia_semana: Number(d.dia_semana), hora_inicio: d.hora_inicio, duracao_min: Number(d.duracao_min), modalidade_id: Number(d.modalidade_id) || null, local_id: d.local_id || null }));
-    toast("Horário salvo. Gere a semana em Hoje → Semana."); fecharModal(); fichaAluno(a.id, "horarios");
-  };
-}
 
 async function formPacote(a) {
   const { data: planos } = await db.planos();
@@ -785,28 +754,90 @@ function formPlano() {
   };
 }
 
-async function formSessao(pre = {}) {
+function remarcarSessao(s) {
+  const dur = (new Date(s.fim) - new Date(s.inicio)) / 60000 || 60, atual = new Date(s.inicio);
+  const corpo = abrirModal("Remarcar", `<form class="form" id="frm"><p class="small muted">${esc(s.alunos?.nome)} · hoje em ${fmtCurta(atual)} às ${fmtHora(atual)}</p>
+    <div class="duas"><label>Novo dia<input type="date" name="data" required value="${isoLocal(atual).slice(0, 10)}"></label><label>Nova hora<input type="time" name="hora" required value="${isoLocal(atual).slice(11, 16)}" step="900"></label></div>
+    <button class="btn primario" type="submit">Remarcar</button></form>`);
+  $("#frm", corpo).onsubmit = async (e) => { e.preventDefault(); const d = formDados(e.target); const ini = new Date(`${d.data}T${d.hora}:00`);
+    await ok(sb.from("sessoes").update({ inicio: ini.toISOString(), fim: new Date(ini.getTime() + dur * 60000).toISOString() }).eq("id", s.id));
+    toast("Aula remarcada."); fecharModal(); render(telaAtual === "alunos" ? "alunos" : "hoje"); };
+}
+
+// Nova aula — um formulário só: aluno, dia, hora, "repetir toda semana". O resto vem preenchido (mais opções).
+async function formAula(pre = {}) {
   const [{ data: alunos }, { data: mods }] = await Promise.all([db.alunos(), db.modalidades()]);
-  const agora = pre.inicio ? new Date(pre.inicio) : new Date(); if (!pre.inicio) { agora.setMinutes(0, 0, 0); agora.setHours(agora.getHours() + 1); }
-  const corpo = abrirModal("Marcar sessão", `
+  const base = pre.inicio ? new Date(pre.inicio) : new Date(); if (!pre.inicio) { base.setMinutes(0, 0, 0); base.setHours(base.getHours() + 1); }
+  const ativos = (alunos || []).filter((x) => x.status === "ativo");
+  const corpo = abrirModal(pre.repetir ? "Horário toda semana" : "Nova aula", `
     <form class="form" id="fs">
-      <label>Aluno<select name="aluno_id" required>${(alunos || []).filter((x) => x.status === "ativo").map((x) => `<option value="${x.id}" ${pre.aluno_id === x.id ? "selected" : ""}>${esc(x.nome)}</option>`).join("")}</select></label>
-      <div class="duas"><label>Início<input type="datetime-local" name="inicio" required value="${isoLocal(agora)}"></label><label>Duração (min)<input type="number" name="duracao" value="60" step="15"></label></div>
-      <div class="duas"><label>Modalidade<select name="modalidade_id">${(mods || []).map((m) => `<option value="${m.id}">${esc(m.nome)}</option>`).join("")}</select></label><label>Local<select name="local_id"></select></label></div>
-      <label class="check"><input type="checkbox" name="usa_pacote" checked> Descontar do pacote ativo</label>
+      <label>Aluno<select name="aluno_id" required>${ativos.map((x) => `<option value="${x.id}" ${pre.aluno_id === x.id ? "selected" : ""}>${esc(x.nome)}</option>`).join("")}</select></label>
+      <div class="duas"><label>Dia<input type="date" name="data" required value="${isoLocal(base).slice(0, 10)}"></label><label>Hora<input type="time" name="hora" required value="${isoLocal(base).slice(11, 16)}" step="900"></label></div>
+      <label class="check grande"><input type="checkbox" name="repetir" ${pre.repetir ? "checked" : ""}> Repetir toda semana neste dia e hora</label>
+      <details><summary class="mono small muted" style="cursor:pointer;padding:6px 0">mais opções</summary>
+        <div class="duas"><label>Duração (min)<input type="number" name="duracao" value="60" step="15" min="30"></label><label>Modalidade<select name="modalidade_id"></select></label></div>
+        <label>Local<select name="local_id"></select></label>
+        <label class="check"><input type="checkbox" name="usa_pacote" checked> Descontar do pacote ativo</label>
+      </details>
       <button class="btn primario" type="submit">Marcar</button>
     </form>`);
   const f = $("#fs", corpo);
-  const carregarLocais = async () => { const { data: ls } = await db.locais(f.aluno_id.value); f.local_id.innerHTML = (ls || []).map((l) => `<option value="${l.id}" ${l.padrao ? "selected" : ""}>${esc(l.apelido || LOCAL_LABEL[l.tipo])} — ${esc(l.bairro || "")}</option>`).join("") || '<option value="">sem local</option>'; };
-  f.aluno_id.onchange = carregarLocais; await carregarLocais();
+  const carregar = async () => {
+    const [{ data: ls }, { data: am }] = await Promise.all([db.locais(f.aluno_id.value), db.alunoModalidades(f.aluno_id.value)]);
+    f.local_id.innerHTML = (ls || []).map((l) => `<option value="${l.id}" ${l.padrao ? "selected" : ""}>${esc(l.apelido || LOCAL_LABEL[l.tipo])} — ${esc(l.bairro || l.endereco || "")}</option>`).join("") || '<option value="">sem local cadastrado</option>';
+    const doAluno = new Set((am || []).map((x) => x.modalidade_id));
+    f.modalidade_id.innerHTML = (mods || []).map((m) => `<option value="${m.id}" ${doAluno.has(m.id) ? "selected" : ""}>${esc(m.nome)}</option>`).join("");
+  };
+  f.aluno_id.onchange = carregar; await carregar();
   f.onsubmit = async (e) => {
     e.preventDefault(); const d = formDados(f);
-    const ini = new Date(d.inicio), fim = new Date(ini.getTime() + Number(d.duracao) * 60000);
-    const pacote = d.usa_pacote ? await db.pacoteAtivo(d.aluno_id) : null;
-    if (d.usa_pacote && !pacote) toast("Aluno sem pacote ativo — sessão marcada como avulsa.", 4000);
-    await ok(sb.from("sessoes").insert({ aluno_id: d.aluno_id, modalidade_id: Number(d.modalidade_id) || null, local_id: d.local_id || null, pacote_id: pacote?.id ?? null, inicio: ini.toISOString(), fim: fim.toISOString(), status: "agendada" }));
-    toast("Sessão marcada."); fecharModal(); pre.aluno_id ? fichaAluno(pre.aluno_id, "sessoes") : render("hoje");
+    const ini = new Date(`${d.data}T${d.hora}:00`), dur = Number(d.duracao) || 60, fim = new Date(ini.getTime() + dur * 60000);
+    if (d.repetir) {
+      await ok(sb.from("horarios_fixos").insert({ aluno_id: d.aluno_id, dia_semana: ini.getDay(), hora_inicio: d.hora, duracao_min: dur, modalidade_id: Number(d.modalidade_id) || null, local_id: d.local_id || null }));
+      const n = await preencherRecorrencias(true);
+      toast(`Horário salvo. ${n} aula(s) já na agenda.`);
+    } else {
+      const pacote = d.usa_pacote ? await db.pacoteAtivo(d.aluno_id) : null;
+      if (d.usa_pacote && !pacote) toast("Aluno sem pacote ativo: aula marcada como avulsa.", 4000);
+      await ok(sb.from("sessoes").insert({ aluno_id: d.aluno_id, modalidade_id: Number(d.modalidade_id) || null, local_id: d.local_id || null, pacote_id: pacote?.id ?? null, inicio: ini.toISOString(), fim: fim.toISOString(), status: "agendada" }));
+      toast("Aula marcada.");
+    }
+    fecharModal(); pre.aluno_id && pre.repetir ? fichaAluno(pre.aluno_id, "horarios") : render("hoje");
   };
+}
+const formSessao = (pre = {}) => formAula(pre);
+
+// Mantém a recorrência preenchida (como um evento semanal da agenda): cria as aulas que faltam nas próximas N semanas.
+// Silencioso e idempotente; roda ao abrir a agenda (no máximo a cada 10 min) e ao salvar um horário.
+async function preencherRecorrencias(forcar = false, semanas = 8) {
+  try {
+    const marca = Number(sessionStorage.getItem("pf_rec_em") || 0);
+    if (!forcar && Date.now() - marca < 10 * 60e3) return 0;
+    const { data: hs } = await db.horariosTodos(); if (!hs?.length) { sessionStorage.setItem("pf_rec_em", Date.now()); return 0; }
+    const de = inicioDia(new Date()), ate = addDias(de, semanas * 7);
+    const { data: ss } = await db.sessoes(de, ate); const existentes = ss || [];
+    const novas = [], pacotes = {}, agora = Date.now();
+    for (let d = new Date(de); d < ate; d = addDias(d, 1)) for (const h of hs.filter((h) => h.dia_semana === d.getDay())) {
+      const [hh, mm] = h.hora_inicio.split(":").map(Number); const ini = new Date(d); ini.setHours(hh, mm, 0, 0);
+      if (ini.getTime() < agora) continue;
+      if (existentes.some((s) => s.aluno_id === h.aluno_id && Math.abs(new Date(s.inicio) - ini) < 36e5)) continue;
+      if (!(h.aluno_id in pacotes)) pacotes[h.aluno_id] = await db.pacoteAtivo(h.aluno_id);
+      novas.push({ aluno_id: h.aluno_id, modalidade_id: h.modalidade_id, local_id: h.local_id, horario_fixo_id: h.id, pacote_id: pacotes[h.aluno_id]?.id ?? null, inicio: ini.toISOString(), fim: new Date(ini.getTime() + h.duracao_min * 60000).toISOString(), status: "agendada" });
+    }
+    if (novas.length) await ok(sb.from("sessoes").insert(novas), "Erro ao preencher a agenda");
+    sessionStorage.setItem("pf_rec_em", Date.now());
+    return novas.length;
+  } catch (e) { console.error(e); return 0; }
+}
+
+// Encerra uma recorrência: desativa o horário e apaga as aulas futuras ainda não realizadas desse horário
+async function removerHorario(h) {
+  await ok(sb.from("horarios_fixos").update({ ativo: false }).eq("id", h.id));
+  const { data: fut } = await sb.from("sessoes").select("id, inicio, horario_fixo_id").eq("aluno_id", h.aluno_id).eq("status", "agendada").gt("inicio", new Date().toISOString());
+  const hm = h.hora_inicio.slice(0, 5);
+  const apagar = (fut || []).filter((s) => s.horario_fixo_id === h.id || (new Date(s.inicio).getDay() === h.dia_semana && fmtHora(s.inicio) === hm)).map((s) => s.id);
+  if (apagar.length) await ok(sb.from("sessoes").delete().in("id", apagar));
+  return apagar.length;
 }
 
 // ---------------------------------------------------------------- 8. boot

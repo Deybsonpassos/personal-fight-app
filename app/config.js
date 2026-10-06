@@ -4,7 +4,7 @@
 window.PF_CONFIG = {
   SUPABASE_URL: "https://medgsedysucmznzebglw.supabase.co",
   SUPABASE_ANON_KEY: "sb_publishable_myTd6nuAxjOcdDL0ZTPBIQ_TJcd7HUb",
-  VERSAO: "0.6.0",
+  VERSAO: "0.7.0",
   // Política padrão (também editável em Acervo → Ajustes; fica salva no navegador do professor)
   ANTECEDENCIA_CANCELAMENTO_HORAS: 12,
 };

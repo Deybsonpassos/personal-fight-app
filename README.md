@@ -1,4 +1,4 @@
-# Personal Fight App — Sprint 6 · Caixa
+# Personal Fight App — Sprint 7 · agenda simples
 
 App do professor para aulas individuais de muay thai e kickboxing (personal itinerante).
 Sprint 1: alunos, locais, horários fixos, agenda semanal, sessões com política de cancelamento, pacotes e planos.
@@ -16,11 +16,14 @@ Sprint 5: **financeiro** — cada aluno tem um modelo de cobrança (**por sessã
 gera lançamento automático (por sessão), mensalidades geradas por mês (botão na aba Hoje), lançamentos avulsos, "pago" em um toque,
 bloco **A receber** (vencido / a vencer) na aba Hoje; **Gerar mês pelos horários fixos** no calendário; proteção contra toque duplo em
 todos os formulários (e limpeza de pacotes duplicados no `sprint5.sql`).
-Sprint 6 (esta): aba **CAIXA** (recebido, despesas, saldo, a vencer, vencido, previsão 30 dias; entradas, saídas e a receber por mês),
+Sprint 6: aba **CAIXA** (recebido, despesas, saldo, a vencer, vencido, previsão 30 dias; entradas, saídas e a receber por mês),
 **Pix da chave do professor** (QR + copia e cola gerados no app, padrão BR Code; `app/pix.js` + `app/qrcode.js` MIT), cobrança pelo WhatsApp com
 o código Pix, períodos **mensal / trimestral / semestral / anual**, despesas com categoria; app do aluno ganha a aba **PLANO** (o que está
 coberto, renovação, em aberto, histórico, **Renovar** → QR Pix → **Já paguei** avisa o professor). Confirmação do pagamento é manual (Caminho 1);
 intermediador com confirmação automática e boleto fica para uma próxima fase.
+Sprint 7 (esta): **agenda no modelo Google Agenda** — um único formulário **Nova aula** (aluno, dia, hora, "repetir toda semana"; o resto vem
+preenchido em "mais opções"), recorrência **preenchida sozinha** ao abrir a agenda (sem botão "gerar"), toque no dia (Semana/Mês) abre Nova aula,
+**Remarcar** no diário, e encerrar um horário apaga as aulas futuras ainda não realizadas.
 
 Stack: HTML + CSS + JavaScript puro (sem framework) + Supabase (Postgres, login, permissões).
 
@@ -77,11 +80,11 @@ Para testar localmente: `cd app && python3 -m http.server 8080` e abra http://lo
    **Acervo → Atendimento**: cadastre as janelas em que você atende (ex.: segunda a sexta, 06:00–10:00 e 17:00–21:00). Sem janelas, o aluno não escolhe horário na entrevista — você marca pela ficha.
 3. **Alunos → + Convite**: nome e WhatsApp do aluno → **Enviar pelo WhatsApp** (abre a conversa com o link pronto). Quando a pessoa responde, a ficha aparece pronta (perfil, restrição de saúde separada, local, consentimentos) e, se houver janelas livres, ela já escolhe os horários semanais (até a frequência combinada; vale por 2 horas após enviar). As sessões das 4 semanas seguintes entram na agenda como **agendadas** — confirme com o aluno e ajuste se precisar.
    Menor de idade ou quem não vai responder pelo celular: **+ Aluno** (cadastro manual).
-4. Na ficha: **Programa → Gerar bloco de 8 sessões** (edite tocando no texto) · **Horários → + Horário fixo** · **Cobrança → editar**: escolha como o aluno paga (por sessão com valor da aula, mensal com valor e dia de vencimento, ou pacote).
+4. Na ficha: **Programa → Gerar bloco de 8 sessões** (edite tocando no texto) · **Horários → + Horário toda semana** (ou Hoje → + Nova aula com "repetir") · **Cobrança → editar**: escolha como o aluno paga (por sessão com valor da aula, mensal com valor e dia de vencimento, ou pacote).
    Por sessão: toda aula **Realizada** ou **Falta sem aviso** (e cancelamento do aluno fora do prazo) vira um lançamento com 7 dias para acertar. Mensal: na aba **Hoje → Gerar mensalidades do mês** (uma vez por mês; repetir não duplica). Pacote: como antes.
    **Acervo → Ajustes → Recebimentos**: cadastre a chave Pix, o nome e a cidade (sem isso o app não gera QR).
    **Caixa**: tudo que entrou e saiu no mês, quem deve (toque → QR Pix, Cobrar pelo WhatsApp, Marcar como pago), + Entrada, + Despesa, Gerar mensalidades.
-5. **Hoje → Mês → Gerar mês pelos horários fixos** (uma vez por mês) ou **Semana → Gerar semana**; **+ Avulsa** para extras.
+5. **Hoje → + Nova aula**: aluno, dia, hora; ligue "Repetir toda semana" para um horário fixo (as próximas 8 semanas entram na hora e o app mantém preenchido). Toque no dia na Semana ou no Mês para marcar naquele dia; toque na aula para abrir o diário, remarcar ou cancelar.
 6. Na aula: **Hoje** mostra a próxima sessão com foco do programa e a claquete para falar ao gravar. Depois: **Abrir diário** → status, correções, como saiu cada técnica, RPE, tarefa → **Realizada**.
 7. **Diários** lista o que falta registrar. **Evolução** (na ficha) é o que o aluno vê no app dele.
 8. **Ficha → Perfil → Código de acesso**: gera o link do app do aluno (`aluno.html?c=...`). Adulto cria e-mail e senha e entra; para menor, o código é do responsável. Se em Authentication → Providers → Email a opção "Confirm email" estiver ligada, a pessoa precisa confirmar o e-mail e abrir o mesmo link de novo.
