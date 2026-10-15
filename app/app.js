@@ -86,6 +86,7 @@ const db = {
   cobrancas: (alunoId) => sb.from("v_cobrancas").select("*").eq("aluno_id", alunoId).order("vence_em", { ascending: false }).limit(60),
   aReceber: () => sb.from("v_a_receber").select("*").order("vence_em"),
   convites: () => sb.from("convites").select("*").is("usado_em", null).gt("expira_em", new Date().toISOString()).order("criado_em", { ascending: false }),
+  convitesPendentes: () => sb.from("convites").select("*").is("usado_em", null).eq("tipo", "entrevista").order("criado_em", { ascending: false }),
 };
 async function ok(promise, msgErro = "Erro ao salvar") { const { data, error } = await promise; if (error) { console.error(error); toast(`${msgErro}: ${error.message}`, 5000); throw error; } return data; }
 
@@ -316,8 +317,17 @@ function formRecebimento(cfgRec) {
 telas.alunos = async (root) => {
   topo("Cadastro", "Alunos", `<button class="badge" id="novo-convite">+ Convite</button>`);
   $("#novo-convite").onclick = criarConvite;
-  root.innerHTML = `<div class="linha-entre" style="margin-top:10px"><input type="search" class="busca" placeholder="Buscar aluno"><button class="btn primario inline" id="novo-aluno">+ Aluno</button></div><div class="lista" id="lista-alunos"></div>
-    <p class="muted small" style="margin-top:14px">Aluno adulto novo: mande um <b>convite</b> (link da entrevista). Ele responde no celular e a ficha aparece aqui pronta. Menor de idade: cadastre manualmente por enquanto (entrevista do responsável na próxima sprint).</p>`;
+  const { data: pend } = await db.convitesPendentes();
+  const agora = Date.now(), dias = (d) => Math.round((new Date(d) - agora) / 864e5);
+  const itemConv = (c) => { const exp = dias(c.expira_em), criado = -dias(c.criado_em), tel = (c.telefone || "").replace(/\D/g, "");
+    const msg = `Oi, ${esc(c.rotulo)}! Passando para lembrar da entrevista inicial do treino, leva uns 5 minutos: ${linkEntrevista(c.token)}`;
+    return `<div class="item" data-tk="${c.token}"><div class="t"><b>${esc(c.rotulo || "sem nome")}</b><span>${c.telefone ? esc(c.telefone) + " · " : ""}enviado há ${criado} dia${criado === 1 ? "" : "s"} · ${exp < 0 ? "<span class='vermelho'>EXPIRADO</span>" : exp <= 2 ? "<span class='vermelho'>expira em " + exp + " dia" + (exp === 1 ? "" : "s") + "</span>" : "expira em " + exp + " dias"}</span></div>${tel && exp >= 0 ? `<a class="btn mini primario" target="_blank" rel="noopener" href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}">cobrar</a>` : ""}${exp < 3 ? `<button class="btn mini renova" data-tk="${c.token}">renovar</button>` : `<button class="btn mini cp" data-tk="${c.token}">link</button>`}<button class="link rm-c" data-tk="${c.token}" title="apagar convite">×</button></div>`; };
+  root.innerHTML = `${pend?.length ? `<div class="secao"><div class="eyebrow">Convites aguardando resposta (${pend.length})</div><div class="lista">${pend.map(itemConv).join("")}</div></div>` : ""}
+    <div class="linha-entre" style="margin-top:10px"><input type="search" class="busca" placeholder="Buscar aluno"><button class="btn primario inline" id="novo-aluno">+ Aluno</button></div><div class="lista" id="lista-alunos"></div>
+    <p class="muted small" style="margin-top:14px">Aluno adulto novo: mande um <b>convite</b> (link da entrevista). Ele responde no celular e a ficha aparece aqui pronta. "Cobrar" abre o WhatsApp com um lembrete e o link; "renovar" dá mais 14 dias a um convite vencendo.</p>`;
+  $$(".cp", root).forEach((b) => (b.onclick = () => copiar(linkEntrevista(b.dataset.tk), "Link copiado.")));
+  $$(".renova", root).forEach((b) => (b.onclick = async () => { b.disabled = true; await ok(sb.from("convites").update({ expira_em: addDias(new Date(), 14).toISOString() }).eq("token", b.dataset.tk)); toast("Convite renovado por 14 dias."); render("alunos"); }));
+  $$(".rm-c", root).forEach((b) => (b.onclick = async () => { if (!confirm("Apagar este convite? O link deixa de funcionar.")) return; b.disabled = true; await ok(sb.from("convites").delete().eq("token", b.dataset.tk)); render("alunos"); }));
   const lista = $("#lista-alunos", root);
   const carregar = async (busca = "") => {
     const { data: al } = await db.alunos(busca);
